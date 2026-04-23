@@ -27,7 +27,7 @@ type seriesSummary struct {
 
 func listSeries(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaBrowse,
+		Toolset: metaBrowse,
 		Tool: mcp.Tool{
 			Name:        "list_series",
 			Description: "List all series in a library",
@@ -107,7 +107,7 @@ type seriesDetail struct {
 
 func getSeries(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaBrowse,
+		Toolset: metaBrowse,
 		Tool: mcp.Tool{
 			Name:        "get_series",
 			Description: "Get details of a series including its books",
@@ -172,7 +172,7 @@ type authorDetail struct {
 
 func getAuthor(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaBrowse,
+		Toolset: metaBrowse,
 		Tool: mcp.Tool{
 			Name:        "get_author",
 			Description: "Get details about an author including their books",
@@ -233,7 +233,7 @@ type collectionSummary struct {
 
 func listCollections(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaBrowse,
+		Toolset: metaBrowse,
 		Tool: mcp.Tool{
 			Name:        "list_collections",
 			Description: "List collections in a library",

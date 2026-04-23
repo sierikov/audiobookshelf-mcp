@@ -15,10 +15,10 @@ func TestRequiredParam(t *testing.T) {
 	assert.Equal(t, "hello", v)
 
 	_, err = RequiredParam[string](args, "missing")
-	assert.ErrorContains(t, err, "missing required parameter")
+	require.ErrorContains(t, err, "missing required parameter")
 
 	_, err = RequiredParam[int](args, "name")
-	assert.ErrorContains(t, err, "wrong type")
+	require.ErrorContains(t, err, "wrong type")
 }
 
 func TestOptionalParam(t *testing.T) {
@@ -51,8 +51,8 @@ func TestOptionalIntParam(t *testing.T) {
 
 func TestDefaultToolsets(t *testing.T) {
 	defaults := DefaultToolsets()
-	assert.True(t, defaults[ToolsetLibraries])
-	assert.True(t, defaults[ToolsetItems])
-	assert.True(t, defaults[ToolsetPlayback])
-	assert.False(t, defaults[ToolsetBrowse])
+	assert.True(t, defaults[toolsetLibraries])
+	assert.True(t, defaults[toolsetItems])
+	assert.True(t, defaults[toolsetPlayback])
+	assert.False(t, defaults[toolsetBrowse])
 }

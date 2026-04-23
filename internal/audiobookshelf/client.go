@@ -43,7 +43,7 @@ func (c *ABSClient) get(ctx context.Context, path string, params url.Values) ([]
 		u.RawQuery = params.Encode()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func (c *ABSClient) get(ctx context.Context, path string, params url.Values) ([]
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

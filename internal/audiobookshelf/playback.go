@@ -27,7 +27,7 @@ type listeningStatsOutput struct {
 
 func getListeningStats(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaPlayback,
+		Toolset: metaPlayback,
 		Tool: mcp.Tool{
 			Name:        "get_listening_stats",
 			Description: "Get your overall listening statistics including total time and daily breakdown",
@@ -75,7 +75,7 @@ type sessionSummary struct {
 
 func getListeningSessions(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaPlayback,
+		Toolset: metaPlayback,
 		Tool: mcp.Tool{
 			Name:        "get_listening_sessions",
 			Description: "Get your recent listening sessions with titles, dates, and durations",
@@ -135,7 +135,7 @@ type progressOutput struct {
 
 func getMediaProgress(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaPlayback,
+		Toolset: metaPlayback,
 		Tool: mcp.Tool{
 			Name:        "get_media_progress",
 			Description: "Get your reading/listening progress for a specific audiobook or podcast episode",

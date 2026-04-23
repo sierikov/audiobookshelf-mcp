@@ -12,10 +12,10 @@ import (
 type ToolsetID string
 
 const (
-	ToolsetLibraries ToolsetID = "libraries"
-	ToolsetItems     ToolsetID = "items"
-	ToolsetPlayback  ToolsetID = "playback"
-	ToolsetBrowse    ToolsetID = "browse"
+	toolsetLibraries ToolsetID = "libraries"
+	toolsetItems     ToolsetID = "items"
+	toolsetPlayback  ToolsetID = "playback"
+	toolsetBrowse    ToolsetID = "browse"
 )
 
 // ToolsetMeta describes a toolset.
@@ -26,15 +26,15 @@ type ToolsetMeta struct {
 }
 
 var (
-	MetaLibraries = ToolsetMeta{ToolsetLibraries, "Library listing and search", true}
-	MetaItems     = ToolsetMeta{ToolsetItems, "Item details and progress tracking", true}
-	MetaPlayback  = ToolsetMeta{ToolsetPlayback, "Listening stats and sessions", true}
-	MetaBrowse    = ToolsetMeta{ToolsetBrowse, "Browse series, authors, collections", false}
+	metaLibraries = ToolsetMeta{toolsetLibraries, "Library listing and search", true}
+	metaItems     = ToolsetMeta{toolsetItems, "Item details and progress tracking", true}
+	metaPlayback  = ToolsetMeta{toolsetPlayback, "Listening stats and sessions", true}
+	metaBrowse    = ToolsetMeta{toolsetBrowse, "Browse series, authors, collections", false}
 )
 
 // AllToolsetMetas returns all defined toolset metadata.
 func AllToolsetMetas() []ToolsetMeta {
-	return []ToolsetMeta{MetaLibraries, MetaItems, MetaPlayback, MetaBrowse}
+	return []ToolsetMeta{metaLibraries, metaItems, metaPlayback, metaBrowse}
 }
 
 // DefaultToolsets returns the set of toolsets enabled by default.
@@ -78,34 +78,34 @@ func (st *ServerTool) Register(s *mcp.Server) {
 }
 
 // RequiredParam extracts a required parameter from args.
-func RequiredParam[T any](args map[string]any, name string) (T, error) {
+func RequiredParam[T any](args map[string]any, name string) (value T, err error) {
 	var zero T
-	v, ok := args[name]
+	candidate, ok := args[name]
 	if !ok {
 		return zero, fmt.Errorf("missing required parameter: %s", name)
 	}
-	tv, ok := v.(T)
+	value, ok = candidate.(T)
 	if !ok {
-		return zero, fmt.Errorf("parameter %s has wrong type: expected %T, got %T", name, zero, v)
+		return zero, fmt.Errorf("parameter %s has wrong type: expected %T, got %T", name, zero, candidate)
 	}
-	return tv, nil
+	return value, nil
 }
 
 // OptionalParam extracts an optional parameter from args.
-func OptionalParam[T any](args map[string]any, name string) (T, bool, error) {
+func OptionalParam[T any](args map[string]any, name string) (value T, ok bool, err error) {
 	var zero T
-	v, ok := args[name]
+	candidate, ok := args[name]
 	if !ok {
 		return zero, false, nil
 	}
-	tv, ok := v.(T)
+	value, ok = candidate.(T)
 	if !ok {
-		return zero, false, fmt.Errorf("parameter %s has wrong type: expected %T, got %T", name, zero, v)
+		return zero, false, fmt.Errorf("parameter %s has wrong type: expected %T, got %T", name, zero, candidate)
 	}
-	return tv, true, nil
+	return value, true, nil
 }
 
-// OptionalIntParam extracts an optional integer parameter, handling JSON number → int conversion.
+// OptionalIntParam extracts an optional integer parameter, handling JSON number →  int conversion.
 func OptionalIntParam(args map[string]any, name string, defaultVal int) (int, error) {
 	v, ok := args[name]
 	if !ok {

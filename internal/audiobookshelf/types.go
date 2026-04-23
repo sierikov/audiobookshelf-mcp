@@ -67,9 +67,9 @@ type BookMetadata struct {
 
 // PodcastMedia contains the media fields for a podcast library item.
 type PodcastMedia struct {
-	Metadata      PodcastMetadata `json:"metadata"`
-	Episodes      []PodcastEpisode `json:"episodes,omitempty"`
-	NumEpisodes   int              `json:"numEpisodes,omitempty"`
+	Metadata    PodcastMetadata  `json:"metadata"`
+	Episodes    []PodcastEpisode `json:"episodes,omitempty"`
+	NumEpisodes int              `json:"numEpisodes,omitempty"`
 }
 
 // PodcastMetadata holds metadata for a podcast.
@@ -84,12 +84,12 @@ type PodcastMetadata struct {
 
 // PodcastEpisode represents a single podcast episode (minimal fields).
 type PodcastEpisode struct {
-	ID        string  `json:"id"`
-	Title     string  `json:"title"`
-	Season    string  `json:"season,omitempty"`
-	Episode   string  `json:"episode,omitempty"`
-	Duration  float64 `json:"duration,omitempty"`
-	PublishedAt int64 `json:"publishedAt,omitempty"`
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Season      string  `json:"season,omitempty"`
+	Episode     string  `json:"episode,omitempty"`
+	Duration    float64 `json:"duration,omitempty"`
+	PublishedAt int64   `json:"publishedAt,omitempty"`
 }
 
 // MediaProgress tracks a user's progress on a library item.
@@ -122,27 +122,27 @@ type ListeningSession struct {
 
 // ListeningStats contains aggregated listening statistics.
 type ListeningStats struct {
-	TotalTime      float64                `json:"totalTime"`
-	Items          map[string]ItemStats   `json:"items"`
-	Days           map[string]float64     `json:"days"`
-	DayOfWeek      map[string]float64     `json:"dayOfWeek"`
-	Today          float64                `json:"today"`
-	RecentSessions []ListeningSession     `json:"recentSessions"`
+	TotalTime      float64              `json:"totalTime"`
+	Items          map[string]ItemStats `json:"items"`
+	Days           map[string]float64   `json:"days"`
+	DayOfWeek      map[string]float64   `json:"dayOfWeek"`
+	Today          float64              `json:"today"`
+	RecentSessions []ListeningSession   `json:"recentSessions"`
 }
 
 // ItemStats tracks per-item listening time.
 type ItemStats struct {
-	ID            string  `json:"id"`
-	TimeListening float64 `json:"timeListening"`
+	ID            string          `json:"id"`
+	TimeListening float64         `json:"timeListening"`
 	MediaMetadata json.RawMessage `json:"mediaMetadata,omitempty"`
 }
 
 // Author represents an Audiobookshelf author.
 type Author struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description,omitempty"`
-	NumBooks    int           `json:"numBooks,omitempty"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Description  string        `json:"description,omitempty"`
+	NumBooks     int           `json:"numBooks,omitempty"`
 	LibraryItems []LibraryItem `json:"libraryItems,omitempty"`
 }
 
@@ -170,19 +170,23 @@ type SearchResults struct {
 	Series  []SearchSeriesHit  `json:"series"`
 }
 
+// SearchBookHit contains a book hit from the search response.
 type SearchBookHit struct {
 	LibraryItem LibraryItem `json:"libraryItem"`
 }
 
+// SearchPodcastHit contains a podcast hit from the search response.
 type SearchPodcastHit struct {
 	LibraryItem LibraryItem `json:"libraryItem"`
 }
 
+// SearchAuthorHit contains an author hit from the search response.
 type SearchAuthorHit struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
+// SearchSeriesHit contains a series hit from the search response.
 type SearchSeriesHit struct {
 	Series Series `json:"series"`
 }

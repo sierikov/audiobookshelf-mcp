@@ -36,7 +36,7 @@ type itemDetail struct {
 
 func getItem(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaItems,
+		Toolset: metaItems,
 		Tool: mcp.Tool{
 			Name:        "get_item",
 			Description: "Get detailed information about an audiobook or podcast by its item ID",
@@ -112,7 +112,7 @@ type inProgressItem struct {
 
 func getItemsInProgress(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaItems,
+		Toolset: metaItems,
 		Tool: mcp.Tool{
 			Name:        "get_items_in_progress",
 			Description: "Get audiobooks and podcasts currently being listened to",

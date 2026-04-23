@@ -1,3 +1,4 @@
+// Package main handles the command-line interface for the Audiobookshelf MCP server.
 package main
 
 import (
@@ -25,7 +26,6 @@ func main() {
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	cfg := audiobookshelf.Config{
 		URL:      url,
@@ -34,6 +34,8 @@ func main() {
 	}
 
 	if err := audiobookshelf.Run(ctx, cfg); err != nil {
+		stop()
 		log.Fatal(err)
 	}
+	stop()
 }

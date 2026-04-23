@@ -27,7 +27,7 @@ type librarySummary struct {
 
 func listLibraries(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaLibraries,
+		Toolset: metaLibraries,
 		Tool: mcp.Tool{
 			Name:        "list_libraries",
 			Description: "List all audiobook and podcast libraries",
@@ -64,7 +64,7 @@ type searchResultItem struct {
 
 func searchLibrary(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaLibraries,
+		Toolset: metaLibraries,
 		Tool: mcp.Tool{
 			Name:        "search_library",
 			Description: "Search a library for audiobooks or podcasts by title, author, or narrator",
@@ -174,7 +174,7 @@ type libraryItemSummary struct {
 
 func listLibraryItems(client *ABSClient) ServerTool {
 	return ServerTool{
-		Toolset: MetaLibraries,
+		Toolset: metaLibraries,
 		Tool: mcp.Tool{
 			Name:        "list_library_items",
 			Description: "List items in a library with pagination",
