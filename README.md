@@ -53,27 +53,53 @@ go install github.com/sierikov/audiobookshelf-mcp/cmd/audiobookshelf-mcp@latest
 **From release binary:**
 
 Download from [Releases](https://github.com/sierikov/audiobookshelf-mcp/releases) and place in your `$PATH`.
-You can do this with following commands (Linux/macOS):
 
-For Linux AMD64:
+<details>
+<summary>Linux (amd64)</summary>
 
 ```bash
 curl -L https://github.com/sierikov/audiobookshelf-mcp/releases/latest/download/audiobookshelf-mcp-linux-amd64 -o audiobookshelf-mcp
 chmod +x audiobookshelf-mcp
 ```
 
-For macOS ARM64:
+</details>
+
+<details>
+<summary>Linux (arm64)</summary>
+
+```bash
+curl -L https://github.com/sierikov/audiobookshelf-mcp/releases/latest/download/audiobookshelf-mcp-linux-arm64 -o audiobookshelf-mcp
+chmod +x audiobookshelf-mcp
+```
+
+</details>
+
+<details>
+<summary>macOS (Apple Silicon / arm64)</summary>
 
 ```bash
 curl -L https://github.com/sierikov/audiobookshelf-mcp/releases/latest/download/audiobookshelf-mcp-macos-arm64 -o audiobookshelf-mcp
 chmod +x audiobookshelf-mcp
 ```
 
-**Docker:**
+</details>
+
+<details>
+<summary>macOS (Intel / amd64)</summary>
 
 ```bash
-docker build -t audiobookshelf-mcp .
+curl -L https://github.com/sierikov/audiobookshelf-mcp/releases/latest/download/audiobookshelf-mcp-macos-amd64 -o audiobookshelf-mcp
+chmod +x audiobookshelf-mcp
 ```
+
+</details>
+
+<details>
+<summary>Windows (amd64)</summary>
+
+Download [`audiobookshelf-mcp-windows-amd64.exe`](https://github.com/sierikov/audiobookshelf-mcp/releases/latest/download/audiobookshelf-mcp-windows-amd64.exe), rename it to `audiobookshelf-mcp.exe`, and add it to a directory in your `%PATH%`.
+
+</details>
 
 ### 3. Configure your AI client
 
@@ -196,9 +222,11 @@ go build -o audiobookshelf-mcp ./cmd/audiobookshelf-mcp
 Cross-compile:
 
 ```bash
-GOOS=linux  GOARCH=amd64 go build -o audiobookshelf-mcp-linux  ./cmd/audiobookshelf-mcp
-GOOS=darwin GOARCH=arm64 go build -o audiobookshelf-mcp-macos  ./cmd/audiobookshelf-mcp
-GOOS=windows GOARCH=amd64 go build -o audiobookshelf-mcp.exe   ./cmd/audiobookshelf-mcp
+GOOS=linux   GOARCH=amd64 go build -o audiobookshelf-mcp-linux-amd64       ./cmd/audiobookshelf-mcp
+GOOS=linux   GOARCH=arm64 go build -o audiobookshelf-mcp-linux-arm64       ./cmd/audiobookshelf-mcp
+GOOS=darwin  GOARCH=amd64 go build -o audiobookshelf-mcp-macos-amd64       ./cmd/audiobookshelf-mcp
+GOOS=darwin  GOARCH=arm64 go build -o audiobookshelf-mcp-macos-arm64       ./cmd/audiobookshelf-mcp
+GOOS=windows GOARCH=amd64 go build -o audiobookshelf-mcp-windows-amd64.exe ./cmd/audiobookshelf-mcp
 ```
 
 ## Security
