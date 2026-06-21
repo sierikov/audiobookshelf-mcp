@@ -15,6 +15,7 @@
   "icon": "icon.png",
   "server": {
     "type": "binary",
+    "entry_point": "audiobookshelf-mcp",
     "mcp_config": {
       "command": "${__dirname}/audiobookshelf-mcp",
       "args": [],

@@ -36,7 +36,7 @@ jobs:
             rm audiobookshelf-mcp
           done
           mkdir -p _win
-          sed 's|${__dirname}/audiobookshelf-mcp"|${__dirname}/audiobookshelf-mcp.exe"|' manifest.json > _win/manifest.json
+          sed 's|${__dirname}/audiobookshelf-mcp"|${__dirname}/audiobookshelf-mcp.exe"|;s|"entry_point": "audiobookshelf-mcp"|"entry_point": "audiobookshelf-mcp.exe"|' manifest.json > _win/manifest.json
           cp icon.png _win/icon.png
           cp audiobookshelf-mcp-windows-amd64.exe _win/audiobookshelf-mcp.exe
           (cd _win && zip ../audiobookshelf-mcp-windows-amd64.mcpb manifest.json icon.png audiobookshelf-mcp.exe)
