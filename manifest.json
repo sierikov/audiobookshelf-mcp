@@ -1,0 +1,43 @@
+{
+  "manifest_version": "0.3",
+  "name": "audiobookshelf-mcp",
+  "display_name": "Audiobookshelf",
+  "version": "0.1.0",
+  "description": "Browse libraries, search books, and control playback in Audiobookshelf.",
+  "author": {
+    "name": "Artem Sierikov"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sierikov/audiobookshelf-mcp"
+  },
+  "license": "MIT",
+  "icon": "icon.png",
+  "server": {
+    "type": "binary",
+    "mcp_config": {
+      "command": "${__dirname}/audiobookshelf-mcp",
+      "args": [],
+      "env": {
+        "AUDIOBOOKSHELF_URL": "${user_config.audiobookshelf_url}",
+        "AUDIOBOOKSHELF_TOKEN": "${user_config.audiobookshelf_token}"
+      }
+    }
+  },
+  "user_config": {
+    "audiobookshelf_url": {
+      "type": "string",
+      "title": "Audiobookshelf URL",
+      "description": "Base URL of your Audiobookshelf instance (e.g. https://audiobooks.example.com)",
+      "required": true,
+      "sensitive": false
+    },
+    "audiobookshelf_token": {
+      "type": "string",
+      "title": "API Token",
+      "description": "API token from Audiobookshelf Settings → API Keys",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}

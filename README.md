@@ -3,6 +3,8 @@
 [![Go](https://github.com/sierikov/audiobookshelf-mcp/actions/workflows/go.yml/badge.svg)](https://github.com/sierikov/audiobookshelf-mcp/actions/workflows/go.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/sierikov/audiobookshelf-mcp)](https://goreportcard.com/report/github.com/sierikov/audiobookshelf-mcp)
 
+- MCP Registry name: `mcp-name: io.github.sierikov/audiobookshelf-mcp`
+
 A Model Context Protocol (MCP) server for [Audiobookshelf](https://www.audiobookshelf.org/) — gives AI assistants
 read-only access to your audiobook and podcast library.
 

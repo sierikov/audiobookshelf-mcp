@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write  # required for OIDC auth with mcp-publisher
     steps:
       - uses: actions/checkout@v4
 
@@ -21,11 +22,71 @@ jobs:
 
       - name: Build binaries
         run: |
-          GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-linux-amd64      ./cmd/audiobookshelf-mcp
-          GOOS=linux   GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-linux-arm64      ./cmd/audiobookshelf-mcp
-          GOOS=darwin  GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-macos-amd64      ./cmd/audiobookshelf-mcp
-          GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-macos-arm64      ./cmd/audiobookshelf-mcp
+          GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-linux-amd64       ./cmd/audiobookshelf-mcp
+          GOOS=linux   GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-linux-arm64       ./cmd/audiobookshelf-mcp
+          GOOS=darwin  GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-macos-amd64       ./cmd/audiobookshelf-mcp
+          GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-macos-arm64       ./cmd/audiobookshelf-mcp
           GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-windows-amd64.exe ./cmd/audiobookshelf-mcp
+
+      - name: Package .mcpb bundles
+        run: |
+          for platform in linux-amd64 linux-arm64 macos-amd64 macos-arm64; do
+            cp audiobookshelf-mcp-${platform} audiobookshelf-mcp
+            zip audiobookshelf-mcp-${platform}.mcpb manifest.json icon.png audiobookshelf-mcp
+            rm audiobookshelf-mcp
+          done
+          mkdir -p _win
+          sed 's|${__dirname}/audiobookshelf-mcp"|${__dirname}/audiobookshelf-mcp.exe"|' manifest.json > _win/manifest.json
+          cp icon.png _win/icon.png
+          cp audiobookshelf-mcp-windows-amd64.exe _win/audiobookshelf-mcp.exe
+          (cd _win && zip ../audiobookshelf-mcp-windows-amd64.mcpb manifest.json icon.png audiobookshelf-mcp.exe)
+          rm -rf _win
+
+      - name: Generate server.json with release URLs and SHA-256 hashes
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          REPO="https://github.com/${{ github.repository }}"
+
+          python3 - <<'EOF'
+          import json, hashlib, os, sys
+
+          version = os.environ["VERSION"]
+          repo    = os.environ["REPO"]
+
+          platforms = [
+            ("macos-arm64",    "audiobookshelf-mcp-macos-arm64.mcpb"),
+            ("macos-amd64",    "audiobookshelf-mcp-macos-amd64.mcpb"),
+            ("linux-amd64",    "audiobookshelf-mcp-linux-amd64.mcpb"),
+            ("linux-arm64",    "audiobookshelf-mcp-linux-arm64.mcpb"),
+            ("windows-amd64",  "audiobookshelf-mcp-windows-amd64.mcpb"),
+          ]
+
+          with open("server.json") as f:
+              srv = json.load(f)
+
+          srv["version"] = version
+          srv["packages"] = []
+
+          for _, filename in platforms:
+              with open(filename, "rb") as f:
+                  sha256 = hashlib.sha256(f.read()).hexdigest()
+              url = f"{repo}/releases/download/v{version}/{filename}"
+              srv["packages"].append({
+                  "registryType": "mcpb",
+                  "identifier": url,
+                  "fileSha256": sha256,
+                  "transport": {"type": "stdio"},
+              })
+
+          with open("server.json", "w") as f:
+              json.dump(srv, f, indent=2)
+              f.write("\n")
+
+          print(f"Generated server.json for v{version} with {len(srv['packages'])} packages")
+          EOF
+        env:
+          VERSION: ${{ github.ref_name }}
+          REPO: https://github.com/${{ github.repository }}
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -36,3 +97,20 @@ jobs:
             audiobookshelf-mcp-macos-amd64
             audiobookshelf-mcp-macos-arm64
             audiobookshelf-mcp-windows-amd64.exe
+            audiobookshelf-mcp-linux-amd64.mcpb
+            audiobookshelf-mcp-linux-arm64.mcpb
+            audiobookshelf-mcp-macos-amd64.mcpb
+            audiobookshelf-mcp-macos-arm64.mcpb
+            audiobookshelf-mcp-windows-amd64.mcpb
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+        continue-on-error: true
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
+        continue-on-error: true  # registry is in preview; don't fail the release if it's down
