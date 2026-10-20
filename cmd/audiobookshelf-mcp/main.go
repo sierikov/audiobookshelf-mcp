@@ -9,7 +9,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/sierikov/audiobookshelf-mcp/internal/audiobookshelf"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/sierikov/audiobookshelf-mcp/internal/abs"
+	"github.com/sierikov/audiobookshelf-mcp/internal/service"
+	"github.com/sierikov/audiobookshelf-mcp/internal/tools"
 )
 
 func main() {
@@ -27,13 +31,16 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
-	cfg := audiobookshelf.Config{
-		URL:      url,
-		Token:    token,
-		Toolsets: toolsets,
-	}
+	client := abs.NewClient(url, token)
+	server := tools.NewServer(tools.Services{
+		Libraries: service.NewLibraries(client),
+		Items:     service.NewItems(client),
+		Playback:  service.NewPlayback(client),
+		Browse:    service.NewBrowse(client),
+		Chapters:  service.NewChapters(client),
+	}, toolsets)
 
-	if err := audiobookshelf.Run(ctx, cfg); err != nil {
+	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
 		stop()
 		log.Fatal(err)
 	}

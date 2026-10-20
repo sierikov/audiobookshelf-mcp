@@ -35,8 +35,17 @@ Ask your AI assistant things like:
 | `get_series` | Get series details with books | browse |
 | `get_author` | Get author details with books | browse |
 | `list_collections` | List collections in a library | browse |
+| `get_chapters` | A book's chapters, duration and audio files | chapters |
+| `search_audible` | Find matching Audible editions, closest runtime first | chapters |
+| `get_audible_chapters` | Audible's chapter list for an ASIN | chapters |
+| `set_chapters` | Replace all of a book's chapters (writes) | chapters |
+| `rename_chapters` | Rename chapters, keeping their timestamps (writes) | chapters |
 
-Default toolsets: `libraries`, `items`, `playback`. The `browse` toolset is opt-in via `AUDIOBOOKSHELF_TOOLSETS`.
+Default toolsets: `libraries`, `items`, `playback`. The `browse` and `chapters` toolsets are opt-in via `AUDIOBOOKSHELF_TOOLSETS`.
+
+### Fixing chapters
+
+With the `chapters` toolset enabled, ask things like *"Fix the chapters for Katabasis"*. The assistant reads the book's current chapters, searches Audible for the edition whose runtime matches your files, fetches its chapters, replaces generic titles ("Chapter 1, 2, 3") with real ones, and shows you the list before saving. When Audible has no match, it can build the list from its own research or from timestamps you give it. Every save returns the previous chapters, so a change can be undone, as long as those old chapters were valid (old chapters that run past the end of the book, for example, cannot be saved back).
 
 ---
 
@@ -172,13 +181,13 @@ Add to `~/.config/opencode/config.json`:
 |---|---|---|---|
 | `AUDIOBOOKSHELF_URL` | Yes | — | Your Audiobookshelf server URL |
 | `AUDIOBOOKSHELF_TOKEN` | Yes | — | API token from Settings → Users |
-| `AUDIOBOOKSHELF_TOOLSETS` | No | `libraries,items,playback` | Comma-separated toolsets to enable. Use `all` to enable everything. |
+| `AUDIOBOOKSHELF_TOOLSETS` | No | `libraries,items,playback` | Comma-separated toolsets to enable: `libraries`, `items`, `playback`, `browse`, `chapters`. Use `all` to enable everything, including the `chapters` write tools. |
 
 ---
 
 ## Security
 
-All tools are **read-only** - no writes, no playback control, no user management. The API token is passed via environment variable, never logged or exposed.
+The default toolsets are **read-only**. Only the opt-in `chapters` toolset writes: `set_chapters` and `rename_chapters` replace a book's chapters. They need an API token whose user has the **Update** permission in Audiobookshelf, are annotated as destructive so MCP clients ask before running them, and return the previous chapters so a change can be undone when those old chapters were valid. `all` includes these write tools; list toolsets explicitly to stay read-only. No tool deletes items, controls playback, or manages users. The API token is passed via environment variable, never logged or exposed.
 
 ## License
 

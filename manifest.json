@@ -21,10 +21,30 @@
       "args": [],
       "env": {
         "AUDIOBOOKSHELF_URL": "${user_config.audiobookshelf_url}",
-        "AUDIOBOOKSHELF_TOKEN": "${user_config.audiobookshelf_token}"
+        "AUDIOBOOKSHELF_TOKEN": "${user_config.audiobookshelf_token}",
+        "AUDIOBOOKSHELF_TOOLSETS": "${user_config.audiobookshelf_toolsets}"
       }
     }
   },
+  "tools": [
+    { "name": "list_libraries", "description": "List all audiobook and podcast libraries" },
+    { "name": "search_library", "description": "Search a library for audiobooks or podcasts by title, author, or narrator" },
+    { "name": "list_library_items", "description": "List items in a library with pagination" },
+    { "name": "get_item", "description": "Get detailed information about an audiobook or podcast by its item ID" },
+    { "name": "get_items_in_progress", "description": "Get audiobooks and podcasts currently being listened to" },
+    { "name": "get_listening_stats", "description": "Get your overall listening statistics including total time and daily breakdown" },
+    { "name": "get_listening_sessions", "description": "Get your recent listening sessions with titles, dates, and durations" },
+    { "name": "get_media_progress", "description": "Get your reading/listening progress for a specific audiobook or podcast episode" },
+    { "name": "list_series", "description": "List all series in a library (opt-in via the browse toolset)" },
+    { "name": "get_series", "description": "Get details of a series including its books (opt-in via the browse toolset)" },
+    { "name": "get_author", "description": "Get details about an author including their books (opt-in via the browse toolset)" },
+    { "name": "list_collections", "description": "List collections in a library (opt-in via the browse toolset)" },
+    { "name": "get_chapters", "description": "Get an audiobook's chapters, total duration and audio files. Times are in seconds. Files are listed for context only; they are rarely chapters. (opt-in via the chapters toolset)" },
+    { "name": "search_audible", "description": "Search Audible for editions of an audiobook, closest runtime first. Pick the unabridged edition in the right language whose runtime matches the book. If none does, retry with another spelling of the author (Audible often uses initials) or another region. (opt-in via the chapters toolset)" },
+    { "name": "get_audible_chapters", "description": "Get Audible's chapter list for an edition by ASIN and region. Times are in seconds. Compare with the book before saving: if runtimeSeconds differs from the book's duration, or the chapters sit a constant few seconds off the book's own (often brandIntroSeconds), shift every start by that offset before set_chapters. (opt-in via the chapters toolset)" },
+    { "name": "set_chapters", "description": "Replace ALL chapters of an audiobook. Show the user the complete list and get their confirmation before calling. Returns the previous chapters; to undo, call again with them. (opt-in via the chapters toolset)" },
+    { "name": "rename_chapters", "description": "Rename an audiobook's chapters, keeping every timestamp. Pass one title per existing chapter, in order. Show the user the new titles and get their confirmation before calling. (opt-in via the chapters toolset)" }
+  ],
   "user_config": {
     "audiobookshelf_url": {
       "type": "string",
@@ -39,6 +59,14 @@
       "description": "API token from Audiobookshelf Settings → API Keys",
       "required": true,
       "sensitive": true
+    },
+    "audiobookshelf_toolsets": {
+      "type": "string",
+      "title": "Toolsets",
+      "description": "Comma-separated toolsets to enable: libraries, items, playback, browse, chapters, or all",
+      "default": "libraries,items,playback",
+      "required": false,
+      "sensitive": false
     }
   }
 }

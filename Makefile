@@ -4,7 +4,7 @@ GO        := go
 GOFLAGS   :=
 MCPB_FILE := audiobookshelf-mcp.mcpb
 
-.PHONY: all build test lint fmt vet check clean mcpb
+.PHONY: all build test lint fmt vet check clean mcpb mocks
 
 all: check build
 
@@ -18,6 +18,9 @@ mcpb: build
 
 test:
 	$(GO) test ./...
+
+mocks:
+	$(GO) tool mockery
 
 lint:
 	golangci-lint run ./...

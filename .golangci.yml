@@ -39,7 +39,39 @@ linters:
     # Security
     - gosec
 
+    # Architecture
+    - depguard
+
   settings:
+    # Layering: tools → service → abs. Each layer only knows the one below it.
+    depguard:
+      rules:
+        abs:
+          files:
+            - "**/internal/abs/**"
+          deny:
+            - pkg: github.com/sierikov/audiobookshelf-mcp/internal/service
+              desc: the API client must not depend on the service layer
+            - pkg: github.com/sierikov/audiobookshelf-mcp/internal/tools
+              desc: the API client must not depend on the MCP tools
+            - pkg: github.com/modelcontextprotocol/go-sdk
+              desc: the API client must not know about MCP
+        service:
+          files:
+            - "**/internal/service/**"
+          deny:
+            - pkg: github.com/sierikov/audiobookshelf-mcp/internal/tools
+              desc: services must not depend on the MCP tools
+            - pkg: github.com/modelcontextprotocol/go-sdk
+              desc: services must not know about MCP
+        tools:
+          files:
+            - "**/internal/tools/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sierikov/audiobookshelf-mcp/internal/abs
+              desc: tools talk to services, never to the API client (wiring tests excepted)
+
     revive:
       rules:
         - name: exported
