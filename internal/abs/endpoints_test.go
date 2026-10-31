@@ -340,3 +340,115 @@ func TestSaveChapters_Non200IsError(t *testing.T) {
 
 	require.ErrorContains(t, err, "ABS API 404")
 }
+
+func TestSearchBooks_DecodesProviderShapes(t *testing.T) {
+	c, _ := newClient(t, map[string]any{"/api/search/books": []any{
+		map[string]any{
+			"title": "Солярис", "author": "Станислав Лем",
+			"publishedYear": 1961, "genres": []any{"Фантастика"},
+			"description": "<p>Солярис…</p>",
+		},
+		map[string]any{
+			"title": "Dune", "author": "Frank Herbert",
+			"publishedYear": "2009", "tags": "Genre Fiction, Literary Fiction", "publisher": "Penguin",
+		},
+	}})
+
+	matches, err := c.SearchBooks(t.Context(), "fantlab", "x", "", "")
+
+	require.NoError(t, err)
+	require.Len(t, matches, 2)
+	assert.Equal(t, abs.FlexString("1961"), matches[0].PublishedYear)
+	assert.Equal(t, []string{"Фантастика"}, matches[0].Genres)
+	assert.Equal(t, "<p>Солярис…</p>", matches[0].Description)
+	assert.Nil(t, matches[0].Tags)
+	assert.Equal(t, abs.FlexString("2009"), matches[1].PublishedYear)
+	assert.Equal(t, abs.FlexStrings{"Genre Fiction", "Literary Fiction"}, matches[1].Tags)
+	assert.Equal(t, "Penguin", matches[1].Publisher)
+}
+
+func TestItem_DecodesTags(t *testing.T) {
+	c, _ := newClient(t, map[string]any{
+		"/api/items/li_1": abstest.BookWithMetadata("li_1", "It", []string{"Horror"}, []string{"horror", "thriller"}, "English", "<p>d</p>"),
+		"/api/items/li_2": map[string]any{
+			"id": "li_2", "mediaType": "book",
+			"media": map[string]any{
+				"metadata": map[string]any{"title": "Null", "genres": nil},
+				"tags":     nil,
+			},
+		},
+	})
+
+	item, err := c.Item(t.Context(), "li_1")
+	require.NoError(t, err)
+	book, err := item.AsBook()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"horror", "thriller"}, book.Tags)
+	assert.Equal(t, []string{"Horror"}, book.Metadata.Genres)
+	assert.Equal(t, "English", book.Metadata.Language)
+	assert.Equal(t, "<p>d</p>", book.Metadata.Description)
+
+	item, err = c.Item(t.Context(), "li_2")
+	require.NoError(t, err)
+	book, err = item.AsBook()
+	require.NoError(t, err)
+	assert.Nil(t, book.Tags)
+	assert.Nil(t, book.Metadata.Genres)
+}
+
+func TestItemsByID(t *testing.T) {
+	c, srv := newClient(t, map[string]any{"/api/items/batch/get": map[string]any{
+		"libraryItems": []any{abstest.BookWithMetadata("li_1", "It", nil, nil, "", "")},
+	}})
+
+	items, err := c.ItemsByID(t.Context(), []string{"li_1", "li_2"})
+
+	require.NoError(t, err)
+	assert.Equal(t, http.MethodPost, srv.LastRequest().Method)
+	assert.JSONEq(t, `{"libraryItemIds":["li_1","li_2"]}`, string(srv.LastBody()))
+	require.Len(t, items, 1)
+	assert.Equal(t, "li_1", items[0].ID)
+}
+
+func TestUpdateItems(t *testing.T) {
+	c, srv := newClient(t, map[string]any{"/api/items/batch/update": map[string]any{"success": true, "updates": 2}})
+
+	n, err := c.UpdateItems(t.Context(), []abs.ItemUpdate{
+		{ID: "li_1", MediaPayload: abs.MediaPayload{Tags: &[]string{}}},
+		{ID: "li_2", MediaPayload: abs.MediaPayload{Metadata: &abs.MetadataPayload{Genres: &[]string{"Science Fiction"}}}},
+		{ID: "li_3", MediaPayload: abs.MediaPayload{Metadata: &abs.MetadataPayload{Language: new(""), Description: new("<p>x</p>")}}},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+	assert.Equal(t, http.MethodPost, srv.LastRequest().Method)
+	assert.Equal(t, "application/json", srv.LastRequest().Header.Get("Content-Type"))
+	assert.JSONEq(t, `[
+		{"id":"li_1","mediaPayload":{"tags":[]}},
+		{"id":"li_2","mediaPayload":{"metadata":{"genres":["Science Fiction"]}}},
+		{"id":"li_3","mediaPayload":{"metadata":{"language":"","description":"<p>x</p>"}}}
+	]`, string(srv.LastBody()))
+}
+
+func TestUpdateItems_Non200IsError(t *testing.T) {
+	c, _ := newClient(t, map[string]any{})
+
+	_, err := c.UpdateItems(t.Context(), []abs.ItemUpdate{{ID: "li_1"}})
+
+	require.ErrorContains(t, err, "ABS API 404")
+}
+
+func TestLastBodyFor_ReturnsBodyOfThatPath(t *testing.T) {
+	c, srv := newClient(t, map[string]any{
+		"/api/items/batch/get":    map[string]any{"libraryItems": []any{}},
+		"/api/items/batch/update": map[string]any{"success": true, "updates": 0},
+	})
+	_, err := c.UpdateItems(t.Context(), []abs.ItemUpdate{{ID: "li_1"}})
+	require.NoError(t, err)
+	_, err = c.ItemsByID(t.Context(), []string{"li_1"})
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `[{"id":"li_1","mediaPayload":{}}]`, string(srv.LastBodyFor("/api/items/batch/update")))
+	assert.JSONEq(t, `{"libraryItemIds":["li_1"]}`, string(srv.LastBody()))
+	assert.Nil(t, srv.LastBodyFor("/api/other"))
+}

@@ -71,6 +71,7 @@ type BookMedia struct {
 	Duration float64      `json:"duration"`
 	Chapters []Chapter    `json:"chapters,omitempty"`
 	Tracks   []AudioTrack `json:"tracks,omitempty"`
+	Tags     []string     `json:"tags,omitempty"`
 }
 
 // Chapter is one chapter of a book. Times are in seconds from the start of
@@ -112,6 +113,7 @@ type PodcastMedia struct {
 	Metadata    PodcastMetadata  `json:"metadata"`
 	Episodes    []PodcastEpisode `json:"episodes,omitempty"`
 	NumEpisodes int              `json:"numEpisodes,omitempty"`
+	Tags        []string         `json:"tags,omitempty"`
 }
 
 // PodcastMetadata holds metadata for a podcast.
@@ -260,17 +262,44 @@ type CollectionsPage struct {
 
 // BookMatch is a book a metadata provider such as Audible found for a search.
 // Duration is in minutes. MatchConfidence is set only when the search named
-// a library item to compare against.
+// a library item to compare against. Providers disagree on the shape of
+// Tags and PublishedYear, hence the flexible types.
 type BookMatch struct {
-	Title           string   `json:"title"`
-	Subtitle        string   `json:"subtitle"`
-	Author          string   `json:"author"`
-	Narrator        string   `json:"narrator"`
-	ASIN            string   `json:"asin"`
-	Language        string   `json:"language"`
-	Duration        float64  `json:"duration"`
-	Abridged        bool     `json:"abridged"`
-	MatchConfidence *float64 `json:"matchConfidence,omitempty"`
+	Title           string      `json:"title"`
+	Subtitle        string      `json:"subtitle"`
+	Author          string      `json:"author"`
+	Narrator        string      `json:"narrator"`
+	ASIN            string      `json:"asin"`
+	Language        string      `json:"language"`
+	Duration        float64     `json:"duration"`
+	Abridged        bool        `json:"abridged"`
+	MatchConfidence *float64    `json:"matchConfidence,omitempty"`
+	Description     string      `json:"description"`
+	Genres          []string    `json:"genres"`
+	Tags            FlexStrings `json:"tags"`
+	Publisher       string      `json:"publisher"`
+	PublishedYear   FlexString  `json:"publishedYear"`
+}
+
+// ItemUpdate is one entry of a batch update: new media fields for one item.
+type ItemUpdate struct {
+	ID           string       `json:"id"`
+	MediaPayload MediaPayload `json:"mediaPayload"`
+}
+
+// MediaPayload holds the media fields an update changes. A nil field is not
+// sent; a pointer to an empty list is sent as is and clears the field.
+type MediaPayload struct {
+	Metadata *MetadataPayload `json:"metadata,omitempty"`
+	Tags     *[]string        `json:"tags,omitempty"`
+}
+
+// MetadataPayload holds the metadata fields an update changes. A nil field is
+// not sent; a pointer to an empty list or string is sent as is.
+type MetadataPayload struct {
+	Genres      *[]string `json:"genres,omitempty"`
+	Language    *string   `json:"language,omitempty"`
+	Description *string   `json:"description,omitempty"`
 }
 
 // AudibleChapters is Audible's chapter list for one edition, as Audnexus

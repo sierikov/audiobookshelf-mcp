@@ -159,3 +159,25 @@ func (c *Client) SaveChapters(ctx context.Context, itemID string, chapters []Cha
 	err := c.do(ctx, http.MethodPost, "/api/items/"+pathParam(itemID)+"/chapters", nil, body, &resp)
 	return resp.Updated, err
 }
+
+// ItemsByID fetches several library items in one request.
+func (c *Client) ItemsByID(ctx context.Context, ids []string) ([]LibraryItem, error) {
+	body := struct {
+		LibraryItemIDs []string `json:"libraryItemIds"`
+	}{ids}
+	var resp struct {
+		LibraryItems []LibraryItem `json:"libraryItems"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/items/batch/get", nil, body, &resp)
+	return resp.LibraryItems, err
+}
+
+// UpdateItems updates the media of several items in one request and returns
+// the number of items Audiobookshelf changed.
+func (c *Client) UpdateItems(ctx context.Context, updates []ItemUpdate) (int, error) {
+	var resp struct {
+		Updates int `json:"updates"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/items/batch/update", nil, updates, &resp)
+	return resp.Updates, err
+}

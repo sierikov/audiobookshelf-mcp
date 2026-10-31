@@ -23,6 +23,7 @@ type Server struct {
 	mu       sync.Mutex
 	requests []*http.Request
 	bodies   [][]byte
+	paths    []string
 }
 
 // NewServer starts a fake API serving routes (URL path → JSON value).
@@ -41,6 +42,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.requests = append(s.requests, r)
 	s.bodies = append(s.bodies, body)
+	s.paths = append(s.paths, r.URL.Path)
 	s.mu.Unlock()
 
 	if r.Header.Get("Authorization") != "Bearer "+Token {
@@ -74,6 +76,18 @@ func (s *Server) LastBody() []byte {
 		return nil
 	}
 	return s.bodies[len(s.bodies)-1]
+}
+
+// LastBodyFor returns the body of the most recent request to path, or nil.
+func (s *Server) LastBodyFor(path string) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.paths) - 1; i >= 0; i-- {
+		if s.paths[i] == path {
+			return s.bodies[i]
+		}
+	}
+	return nil
 }
 
 // BookItem builds a book library item fixture.
@@ -175,6 +189,24 @@ func BookWithChapters(id, title, author, asin string, duration float64, chapters
 			"duration": duration,
 			"chapters": chapters,
 			"tracks":   tracks,
+		},
+	}
+}
+
+// BookWithMetadata builds a book item with the fields a metadata survey
+// reads: genres, language and description in the metadata, tags on the media.
+func BookWithMetadata(id, title string, genres, tags []string, language, description string) map[string]any {
+	return map[string]any{
+		"id":        id,
+		"mediaType": "book",
+		"media": map[string]any{
+			"metadata": map[string]any{
+				"title":       title,
+				"genres":      genres,
+				"language":    language,
+				"description": description,
+			},
+			"tags": tags,
 		},
 	}
 }
