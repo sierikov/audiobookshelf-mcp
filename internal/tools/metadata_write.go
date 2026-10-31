@@ -146,7 +146,7 @@ func requiredStrings(args map[string]any, name, noun string) ([]string, error) {
 func addGenres(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "add_genres",
-		description: `Add genres to one or more books (up to 100). Genres a book already has are skipped; a genre it has in another case is an error. Show the user the books and the genres and get their confirmation before calling. To rename a genre, call remove_genres with the old name, then add_genres with the new one. Each changed book lists the genres it gained in added; to undo, call remove_genres with exactly those genres on that book (books with the same added genres can share one call).`,
+		description: `Add genres to one or more books (up to 100). Genres a book already has are skipped; a genre it has in another case is an error. Show the user the books and the genres and get their confirmation before calling. To rename a genre, call add_genres with the new name first, then remove_genres with the old one, so no book is left without it; only for a change of case (fiction → Fiction), remove first, because adding a case variant is an error. Each changed book lists the genres it gained in added; to undo, call remove_genres with exactly those genres on that book (books with the same added genres can share one call).`,
 		plural:      "genres",
 		noun:        "genre",
 		errorPrefix: "failed to add genres: ",
@@ -158,7 +158,7 @@ func addGenres(svc MetadataService) ServerTool {
 func removeGenres(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "remove_genres",
-		description: `Remove genres from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the genre are left unchanged. Show the user the books and the genres and get their confirmation before calling. Each changed book lists the genres it lost in removed; to undo, call add_genres with exactly those genres on that book (books with the same removed genres can share one call).`,
+		description: `Remove genres from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the genre are left unchanged. Show the user the books and the genres and get their confirmation before calling. For a rename, add the new name with add_genres first. Each changed book lists the genres it lost in removed; to undo, call add_genres with exactly those genres on that book (books with the same removed genres can share one call).`,
 		plural:      "genres",
 		noun:        "genre",
 		errorPrefix: "failed to remove genres: ",
@@ -171,7 +171,7 @@ func removeGenres(svc MetadataService) ServerTool {
 func addTags(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "add_tags",
-		description: `Add tags to one or more books (up to 100). Tags a book already has are skipped; a tag it has in another case is an error. Show the user the books and the tags and get their confirmation before calling. To rename a tag, call remove_tags with the old name, then add_tags with the new one. Each changed book lists the tags it gained in added; to undo, call remove_tags with exactly those tags on that book (books with the same added tags can share one call).`,
+		description: `Add tags to one or more books (up to 100). Tags a book already has are skipped; a tag it has in another case is an error. Show the user the books and the tags and get their confirmation before calling. To rename a tag, call add_tags with the new name first, then remove_tags with the old one, so no book is left without it; only for a change of case (fiction → Fiction), remove first, because adding a case variant is an error. Each changed book lists the tags it gained in added; to undo, call remove_tags with exactly those tags on that book (books with the same added tags can share one call).`,
 		plural:      "tags",
 		noun:        "tag",
 		errorPrefix: "failed to add tags: ",
@@ -183,7 +183,7 @@ func addTags(svc MetadataService) ServerTool {
 func removeTags(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "remove_tags",
-		description: `Remove tags from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the tag are left unchanged. Show the user the books and the tags and get their confirmation before calling. Each changed book lists the tags it lost in removed; to undo, call add_tags with exactly those tags on that book (books with the same removed tags can share one call).`,
+		description: `Remove tags from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the tag are left unchanged. Show the user the books and the tags and get their confirmation before calling. For a rename, add the new name with add_tags first. Each changed book lists the tags it lost in removed; to undo, call add_tags with exactly those tags on that book (books with the same removed tags can share one call).`,
 		plural:      "tags",
 		noun:        "tag",
 		errorPrefix: "failed to remove tags: ",
