@@ -109,6 +109,8 @@ func (s *Metadata) changeLists(ctx context.Context, itemIDs, values []string, fi
 	if values, err = checkValues(values); err != nil {
 		return ListChangeResult{}, err
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	books, err := s.readBooks(ctx, ids)
 	if err != nil {
 		return ListChangeResult{}, err
@@ -174,6 +176,8 @@ func (s *Metadata) Update(ctx context.Context, changes []ItemChange) (UpdateResu
 	if err != nil {
 		return UpdateResult{}, err
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	before, err := s.readBooks(ctx, ids)
 	if err != nil {
 		return UpdateResult{}, err

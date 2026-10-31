@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/sierikov/audiobookshelf-mcp/internal/abs"
 )
@@ -14,6 +15,9 @@ import (
 // library, finds books by them, and looks books up on metadata providers.
 type Metadata struct {
 	api MetadataAPI
+	// writeMu serializes writes. Each one reads the book, then saves values
+	// computed from what it read, so two at once could lose one's change.
+	writeMu sync.Mutex
 }
 
 // NewMetadata creates a Metadata service backed by api.

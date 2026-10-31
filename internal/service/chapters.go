@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sierikov/audiobookshelf-mcp/internal/abs"
@@ -16,6 +17,9 @@ import (
 // new chapters after checking they make sense.
 type Chapters struct {
 	api ChaptersAPI
+	// writeMu serializes writes. Each one reads the book, then saves chapters
+	// built from what it read, so two at once could lose one's change.
+	writeMu sync.Mutex
 }
 
 // NewChapters creates a Chapters service backed by api.
@@ -98,6 +102,8 @@ func (s *Chapters) AudibleChapters(ctx context.Context, asin, region string) (Au
 // with the book. An empty list removes all chapters. The result carries the
 // chapters that were replaced, so the change can be undone.
 func (s *Chapters) Set(ctx context.Context, itemID string, chapters []ChapterInput) (ChapterChange, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	b, err := s.writableBook(ctx, itemID)
 	if err != nil {
 		return ChapterChange{}, err
@@ -116,6 +122,8 @@ func (s *Chapters) Set(ctx context.Context, itemID string, chapters []ChapterInp
 // Rename gives a book's chapters new titles, one per existing chapter in
 // order. Times are sent back exactly as they are, unchecked.
 func (s *Chapters) Rename(ctx context.Context, itemID string, titles []string) (ChapterChange, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	b, err := s.writableBook(ctx, itemID)
 	if err != nil {
 		return ChapterChange{}, err
