@@ -341,7 +341,7 @@ func searchBookMetadata(svc MetadataService) ServerTool {
 		Toolset: metaMetadata,
 		Tool: mcp.Tool{
 			Name:        "search_book_metadata",
-			Description: "Look a book up in one metadata source and return candidates with their title, author, genres, tags and description (HTML). Use fantlab for Russian-language fiction, audible for English, and google as a fallback. Provider genres are hints to map onto the user's own genre list, not values to copy. If no source has a description and you write one yourself, tell the user. To find an edition's chapters by runtime, use search_audible instead.",
+			Description: "Look a book up in one metadata source and return candidates with their title, author, genres, tags and description (HTML). Use fantlab for Russian-language fiction, audible for English, and google as a fallback. If a source returns nothing, retry with another spelling of the author or title before trying another source (sources spell names differently, e.g. Брендон and Брэндон). Provider genres are hints to map onto the user's own genre list, not values to copy. If no source has a description and you write one yourself, tell the user. To find an edition's chapters by runtime, use search_audible instead.",
 			Annotations: openWorldReadAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
