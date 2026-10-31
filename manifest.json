@@ -3,7 +3,7 @@
   "name": "audiobookshelf-mcp",
   "display_name": "Audiobookshelf",
   "version": "0.1.0",
-  "description": "Browse libraries, search books, and control playback in Audiobookshelf.",
+  "description": "Browse your Audiobookshelf libraries, listening progress and stats. Opt-in toolsets fix chapters, genres, tags, language and descriptions.",
   "author": {
     "name": "Artem Sierikov"
   },
