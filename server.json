@@ -7,35 +7,35 @@
     "url": "https://github.com/sierikov/audiobookshelf-mcp",
     "source": "github"
   },
-  "version": "0.0.1",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/sierikov/audiobookshelf-mcp/releases/download/v0.0.1/audiobookshelf-mcp-macos-arm64.mcpb",
+      "identifier": "https://github.com/sierikov/audiobookshelf-mcp/releases/download/v0.2.0/audiobookshelf-mcp-macos-arm64.mcpb",
       "fileSha256": "PLACEHOLDER",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/sierikov/audiobookshelf-mcp/releases/download/v0.0.1/audiobookshelf-mcp-macos-amd64.mcpb",
+      "identifier": "https://github.com/sierikov/audiobookshelf-mcp/releases/download/v0.2.0/audiobookshelf-mcp-macos-amd64.mcpb",
       "fileSha256": "PLACEHOLDER",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/sierikov/audiobookshelf-mcp/releases/download/v0.0.1/audiobookshelf-mcp-linux-amd64.mcpb",
+      "identifier": "https://github.com/sierikov/audiobookshelf-mcp/releases/download/v0.2.0/audiobookshelf-mcp-linux-amd64.mcpb",
       "fileSha256": "PLACEHOLDER",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/sierikov/audiobookshelf-mcp/releases/download/v0.0.1/audiobookshelf-mcp-linux-arm64.mcpb",
+      "identifier": "https://github.com/sierikov/audiobookshelf-mcp/releases/download/v0.2.0/audiobookshelf-mcp-linux-arm64.mcpb",
       "fileSha256": "PLACEHOLDER",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/sierikov/audiobookshelf-mcp/releases/download/v0.0.1/audiobookshelf-mcp-windows-amd64.mcpb",
+      "identifier": "https://github.com/sierikov/audiobookshelf-mcp/releases/download/v0.2.0/audiobookshelf-mcp-windows-amd64.mcpb",
       "fileSha256": "PLACEHOLDER",
       "transport": { "type": "stdio" }
     }

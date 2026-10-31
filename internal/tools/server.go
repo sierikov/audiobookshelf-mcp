@@ -24,7 +24,7 @@ func NewServer(svcs Services, toolsets []string) *mcp.Server {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "audiobookshelf-mcp-server",
-			Version: "0.1.0",
+			Version: "0.2.0",
 		},
 		nil,
 	)
