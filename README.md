@@ -41,7 +41,7 @@ Ask your AI assistant things like:
 | `set_chapters` | Replace all of a book's chapters (writes) | chapters |
 | `rename_chapters` | Rename chapters, keeping their timestamps (writes) | chapters |
 | `get_metadata_overview` | Count every genre, tag and language in a library, and the books missing them | metadata |
-| `find_items` | List books with their genres, tags, language and a description preview, filtered | metadata |
+| `find_items` | List books with their genres, tags and language, filtered; `detail: full` adds a description preview | metadata |
 | `search_book_metadata` | Look a book up in one metadata source (fantlab, google, audible, openlibrary, itunes) | metadata |
 | `add_genres` | Add genres to books (writes) | metadata |
 | `remove_genres` | Remove genres from books (writes) | metadata |

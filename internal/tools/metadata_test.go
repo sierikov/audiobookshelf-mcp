@@ -74,6 +74,7 @@ func TestMetadataTools_Annotations(t *testing.T) {
 	findSchema, ok := find.Tool.InputSchema.(*jsonschema.Schema)
 	require.True(t, ok)
 	assert.Equal(t, []any{"genres", "tags", "language", "description"}, findSchema.Properties["missing"].Enum)
+	assert.Equal(t, []any{"summary", "full"}, findSchema.Properties["detail"].Enum)
 	assert.Equal(t, []string{"libraryId"}, findSchema.Required)
 }
 
@@ -141,6 +142,7 @@ func TestFindItems(t *testing.T) {
 
 	result := call(t, MetadataTools(svc), "find_items", map[string]any{
 		"libraryId": "lib-1", "genre": "Детектив", "missing": "description", "limit": float64(10), "page": float64(1),
+		"detail": "full",
 	})
 
 	assertJSON(t, `{
@@ -151,6 +153,43 @@ func TestFindItems(t *testing.T) {
 		],
 		"total":11,"page":1
 	}`, result)
+}
+
+func TestFindItems_SummaryByDefault(t *testing.T) {
+	svc := NewMockMetadataService(t)
+	svc.EXPECT().Find(mock.Anything, "lib-1", service.ItemFilter{Genre: "Детектив"}, service.Page{Limit: 50}).
+		Return(service.MetadataPage{
+			Items: []service.MetadataItem{
+				{
+					ID: "li_1", Title: "Дело", Author: "А. Автор", Series: "Цикл", Language: "Russian",
+					Genres: []string{"Детектив"}, Tags: []string{"classic"}, Description: "Коротко",
+				},
+				{ID: "li_2", Title: "Bare", Author: "B"},
+			},
+			Total: 2,
+		}, nil)
+
+	result := call(t, MetadataTools(svc), "find_items", map[string]any{"libraryId": "lib-1", "genre": "Детектив"})
+
+	assertJSON(t, `{
+		"items":[
+			{"itemId":"li_1","title":"Дело","author":"А. Автор","series":"Цикл","language":"Russian",
+			 "genres":["Детектив"],"tags":["classic"]},
+			{"itemId":"li_2","title":"Bare","author":"B","genres":[],"tags":[]}
+		],
+		"total":2,"page":0
+	}`, result)
+}
+
+func TestFindItems_FullShowsEmptyDescription(t *testing.T) {
+	svc := NewMockMetadataService(t)
+	svc.EXPECT().Find(mock.Anything, "lib-1", service.ItemFilter{}, service.Page{Limit: 50}).
+		Return(service.MetadataPage{Items: []service.MetadataItem{{ID: "li_2", Title: "Bare", Author: "B"}}, Total: 1}, nil)
+
+	result := call(t, MetadataTools(svc), "find_items", map[string]any{"libraryId": "lib-1", "detail": "full"})
+
+	assertJSON(t, `{"items":[{"itemId":"li_2","title":"Bare","author":"B","genres":[],"tags":[],
+		"description":"","descriptionLength":0}],"total":1,"page":0}`, result)
 }
 
 func TestFindItems_Defaults(t *testing.T) {
@@ -176,7 +215,7 @@ func TestFindItems_Preview(t *testing.T) {
 			Total: 3,
 		}, nil)
 
-	result := call(t, MetadataTools(svc), "find_items", map[string]any{"libraryId": "lib-1"})
+	result := call(t, MetadataTools(svc), "find_items", map[string]any{"libraryId": "lib-1", "detail": "full"})
 
 	require.False(t, result.IsError, resultText(result))
 	var out struct {
@@ -217,6 +256,10 @@ func TestFindItems_BadArguments(t *testing.T) {
 		call(t, tools, "find_items", map[string]any{"libraryId": "lib-1", "limit": "ten"}))
 	assertToolError(t, "parameter genre has wrong type: expected string, got float64",
 		call(t, tools, "find_items", map[string]any{"libraryId": "lib-1", "genre": 1.0}))
+	assertToolError(t, `detail must be "summary" or "full", got "everything"`,
+		call(t, tools, "find_items", map[string]any{"libraryId": "lib-1", "detail": "everything"}))
+	assertToolError(t, "parameter detail has wrong type: expected string, got float64",
+		call(t, tools, "find_items", map[string]any{"libraryId": "lib-1", "detail": 1.0}))
 }
 
 func TestSearchBookMetadata(t *testing.T) {

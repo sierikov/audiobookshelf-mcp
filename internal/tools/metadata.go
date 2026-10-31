@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,6 +26,13 @@ func MetadataTools(svc MetadataService) []ServerTool {
 
 // descriptionPreviewRunes is how much of a description find_items shows.
 const descriptionPreviewRunes = 200
+
+// Detail levels of find_items: summary leaves descriptions out, full adds a
+// preview of each and its length.
+const (
+	detailSummary = "summary"
+	detailFull    = "full"
+)
 
 // defaultFindLimit is how many books find_items returns per page when the
 // caller gives no limit.
@@ -180,8 +188,8 @@ type metadataItemOutput struct {
 	Language          string   `json:"language,omitempty"`
 	Genres            []string `json:"genres"`
 	Tags              []string `json:"tags"`
-	Description       string   `json:"description"`
-	DescriptionLength int      `json:"descriptionLength"`
+	Description       *string  `json:"description,omitzero"`
+	DescriptionLength *int     `json:"descriptionLength,omitzero"`
 }
 
 type metadataPageOutput struct {
@@ -190,21 +198,25 @@ type metadataPageOutput struct {
 	Page  int                  `json:"page"`
 }
 
-func toMetadataItems(items []service.MetadataItem) []metadataItemOutput {
+// toMetadataItems maps books to output rows. Only full rows carry the
+// description preview and length, so a summary stays small.
+func toMetadataItems(items []service.MetadataItem, full bool) []metadataItemOutput {
 	out := make([]metadataItemOutput, 0, len(items))
 	for _, it := range items {
-		head, length := preview(it.Description, descriptionPreviewRunes)
-		out = append(out, metadataItemOutput{
-			ItemID:            it.ID,
-			Title:             it.Title,
-			Author:            it.Author,
-			Series:            it.Series,
-			Language:          it.Language,
-			Genres:            nonNil(it.Genres),
-			Tags:              nonNil(it.Tags),
-			Description:       head,
-			DescriptionLength: length,
-		})
+		row := metadataItemOutput{
+			ItemID:   it.ID,
+			Title:    it.Title,
+			Author:   it.Author,
+			Series:   it.Series,
+			Language: it.Language,
+			Genres:   nonNil(it.Genres),
+			Tags:     nonNil(it.Tags),
+		}
+		if full {
+			head, length := preview(it.Description, descriptionPreviewRunes)
+			row.Description, row.DescriptionLength = &head, &length
+		}
+		out = append(out, row)
 	}
 	return out
 }
@@ -214,6 +226,7 @@ type findArgs struct {
 	libraryID string
 	filter    service.ItemFilter
 	page      service.Page
+	full      bool
 }
 
 func parseFindArgs(args map[string]any) (findArgs, error) {
@@ -233,10 +246,18 @@ func parseFindArgs(args map[string]any) (findArgs, error) {
 	if err != nil {
 		return findArgs{}, err
 	}
+	detail, _, err := OptionalParam[string](args, "detail")
+	if err != nil {
+		return findArgs{}, err
+	}
+	if detail != "" && detail != detailSummary && detail != detailFull {
+		return findArgs{}, fmt.Errorf("detail must be %q or %q, got %q", detailSummary, detailFull, detail)
+	}
 	return findArgs{
 		libraryID: libraryID,
 		filter:    service.ItemFilter{Genre: strs[0], Tag: strs[1], Language: strs[2], Missing: service.MissingField(strs[3])},
 		page:      service.Page{Limit: limit, Page: page},
+		full:      detail == detailFull,
 	}, nil
 }
 
@@ -249,7 +270,7 @@ func findItems(svc MetadataService) ServerTool {
 		Toolset: metaMetadata,
 		Tool: mcp.Tool{
 			Name:        "find_items",
-			Description: "List a library's books with their genres, tags, language and the first 200 characters of their plain-text description. Optional filters combine: genre, tag and language match exactly, as get_metadata_overview counts them; missing picks books that lack genres, tags, a language or a description. Sorted by title. Pass the itemIds to the write tools.",
+			Description: "List a library's books with their genres, tags and language. Use detail \"summary\" (the default) for ids and lists, which is enough for genre, tag and language changes; use \"full\" to also get the first 200 characters of each plain-text description and its length, to find missing or junk descriptions. Read one book's whole description with get_item. Optional filters combine: genre, tag and language match exactly, as get_metadata_overview counts them; missing picks books that lack genres, tags, a language or a description. Sorted by title. Pass the itemIds to the write tools.",
 			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
@@ -261,6 +282,11 @@ func findItems(svc MetadataService) ServerTool {
 					"missing":   {Type: "string", Enum: missing, Description: "Only books that lack this field"},
 					"limit":     {Type: "number", Description: "Max books per page (default 50, at most 100)"},
 					"page":      {Type: "number", Description: "Page number, starting at 0 (default 0)"},
+					"detail": {
+						Type:        "string",
+						Enum:        []any{detailSummary, detailFull},
+						Description: "summary (default): id, title, author, series, genres, tags, language. full: also the first 200 characters of the description and its length",
+					},
 				},
 				Required: []string{"libraryId"},
 			},
@@ -277,7 +303,7 @@ func findItems(svc MetadataService) ServerTool {
 			}
 
 			return marshalledResult(metadataPageOutput{
-				Items: toMetadataItems(p.Items),
+				Items: toMetadataItems(p.Items, a.full),
 				Total: p.Total,
 				Page:  p.Page,
 			})
