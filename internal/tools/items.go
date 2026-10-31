@@ -32,6 +32,7 @@ type itemDetail struct {
 	PublishedYear string   `json:"publishedYear,omitempty"`
 	Publisher     string   `json:"publisher,omitempty"`
 	Genres        []string `json:"genres,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
 	Language      string   `json:"language,omitempty"`
 	NumEpisodes   int      `json:"numEpisodes,omitempty"`
 }
@@ -82,6 +83,7 @@ func getItem(svc ItemService) ServerTool {
 				PublishedYear: d.PublishedYear,
 				Publisher:     d.Publisher,
 				Genres:        d.Genres,
+				Tags:          d.Tags,
 				Language:      d.Language,
 				NumEpisodes:   d.NumEpisodes,
 			})

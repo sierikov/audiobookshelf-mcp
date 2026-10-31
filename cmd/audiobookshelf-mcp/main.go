@@ -38,6 +38,7 @@ func main() {
 		Playback:  service.NewPlayback(client),
 		Browse:    service.NewBrowse(client),
 		Chapters:  service.NewChapters(client),
+		Metadata:  service.NewMetadata(client),
 	}, toolsets)
 
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {

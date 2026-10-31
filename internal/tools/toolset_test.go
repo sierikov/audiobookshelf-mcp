@@ -56,6 +56,7 @@ func TestDefaultToolsets(t *testing.T) {
 	assert.True(t, defaults[toolsetPlayback])
 	assert.False(t, defaults[toolsetBrowse])
 	assert.False(t, defaults[toolsetChapters])
+	assert.False(t, defaults[toolsetMetadata])
 }
 
 func TestResolveToolsets(t *testing.T) {
@@ -63,5 +64,7 @@ func TestResolveToolsets(t *testing.T) {
 	assert.Equal(t, map[ToolsetID]bool{toolsetBrowse: true, toolsetItems: true}, resolveToolsets([]string{"browse", " items "}))
 	assert.Len(t, resolveToolsets([]string{"all"}), len(AllToolsetMetas()))
 	assert.True(t, resolveToolsets([]string{"all"})[toolsetChapters])
+	assert.True(t, resolveToolsets([]string{"all"})[toolsetMetadata])
 	assert.Equal(t, map[ToolsetID]bool{toolsetChapters: true}, resolveToolsets([]string{"chapters"}))
+	assert.Equal(t, map[ToolsetID]bool{toolsetMetadata: true}, resolveToolsets([]string{"metadata"}))
 }

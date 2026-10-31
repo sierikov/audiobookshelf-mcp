@@ -17,6 +17,7 @@ const (
 	toolsetPlayback  ToolsetID = "playback"
 	toolsetBrowse    ToolsetID = "browse"
 	toolsetChapters  ToolsetID = "chapters"
+	toolsetMetadata  ToolsetID = "metadata"
 )
 
 // ToolsetMeta describes a toolset.
@@ -32,11 +33,12 @@ var (
 	metaPlayback  = ToolsetMeta{toolsetPlayback, "Listening stats and sessions", true}
 	metaBrowse    = ToolsetMeta{toolsetBrowse, "Browse series, authors, collections", false}
 	metaChapters  = ToolsetMeta{toolsetChapters, "Find, fix and save audiobook chapters (includes writes)", false}
+	metaMetadata  = ToolsetMeta{toolsetMetadata, "Survey and fix genres, tags, language and descriptions (includes writes)", false}
 )
 
 // AllToolsetMetas returns all defined toolset metadata.
 func AllToolsetMetas() []ToolsetMeta {
-	return []ToolsetMeta{metaLibraries, metaItems, metaPlayback, metaBrowse, metaChapters}
+	return []ToolsetMeta{metaLibraries, metaItems, metaPlayback, metaBrowse, metaChapters, metaMetadata}
 }
 
 // DefaultToolsets returns the set of toolsets enabled by default.

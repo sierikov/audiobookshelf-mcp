@@ -414,13 +414,5 @@ func parseChapterInputs(raw []any) ([]service.ChapterInput, error) {
 
 // parseTitles reads the rename_chapters list of titles.
 func parseTitles(raw []any) ([]string, error) {
-	out := make([]string, 0, len(raw))
-	for i, item := range raw {
-		title, ok := item.(string)
-		if !ok {
-			return nil, fmt.Errorf("title %d must be a string", i+1)
-		}
-		out = append(out, title)
-	}
-	return out, nil
+	return parseStrings(raw, "title")
 }

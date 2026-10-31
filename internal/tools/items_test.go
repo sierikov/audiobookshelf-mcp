@@ -21,6 +21,7 @@ func TestGetItem_Book(t *testing.T) {
 		PublishedYear: "2025",
 		Publisher:     "Harper Voyager",
 		Genres:        []string{"Fantasy", "Fiction"},
+		Tags:          []string{"horror"},
 		Language:      "English",
 	}, nil)
 
@@ -30,7 +31,7 @@ func TestGetItem_Book(t *testing.T) {
 		"id":"item-1","mediaType":"book","title":"Katabasis","subtitle":"A Novel",
 		"author":"R.F. Kuang","narrator":"Billie Fulford-Brown","seriesName":"Standalone",
 		"description":"A descent","duration":"12h 0m","publishedYear":"2025",
-		"publisher":"Harper Voyager","genres":["Fantasy","Fiction"],"language":"English"
+		"publisher":"Harper Voyager","genres":["Fantasy","Fiction"],"tags":["horror"],"language":"English"
 	}`, result)
 }
 

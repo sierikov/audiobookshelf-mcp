@@ -8,12 +8,13 @@ import (
 
 // AllTools returns every tool the server can offer, backed by svcs.
 func AllTools(svcs Services) []ServerTool {
-	tools := make([]ServerTool, 0, 17)
+	tools := make([]ServerTool, 0, 25)
 	tools = append(tools, LibraryTools(svcs.Libraries)...)
 	tools = append(tools, ItemTools(svcs.Items)...)
 	tools = append(tools, PlaybackTools(svcs.Playback)...)
 	tools = append(tools, BrowseTools(svcs.Browse)...)
 	tools = append(tools, ChapterTools(svcs.Chapters)...)
+	tools = append(tools, MetadataTools(svcs.Metadata)...)
 	return tools
 }
 

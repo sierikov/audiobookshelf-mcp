@@ -45,3 +45,17 @@ func OptionalIntParam(args map[string]any, name string, defaultVal int) (int, er
 		return 0, fmt.Errorf("parameter %s: expected number, got %T", name, v)
 	}
 }
+
+// parseStrings reads a list of strings. Items are numbered from 1 in errors,
+// as "<noun> 2 must be a string".
+func parseStrings(raw []any, noun string) ([]string, error) {
+	out := make([]string, 0, len(raw))
+	for i, item := range raw {
+		s, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s %d must be a string", noun, i+1)
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}

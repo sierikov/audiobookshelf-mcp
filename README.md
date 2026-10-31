@@ -40,12 +40,24 @@ Ask your AI assistant things like:
 | `get_audible_chapters` | Audible's chapter list for an ASIN | chapters |
 | `set_chapters` | Replace all of a book's chapters (writes) | chapters |
 | `rename_chapters` | Rename chapters, keeping their timestamps (writes) | chapters |
+| `get_metadata_overview` | Count every genre, tag and language in a library, and the books missing them | metadata |
+| `find_items` | List books with their genres, tags, language and a description preview, filtered | metadata |
+| `search_book_metadata` | Look a book up in one metadata source (fantlab, google, audible, openlibrary, itunes) | metadata |
+| `add_genres` | Add genres to books (writes) | metadata |
+| `remove_genres` | Remove genres from books (writes) | metadata |
+| `add_tags` | Add tags to books (writes) | metadata |
+| `remove_tags` | Remove tags from books (writes) | metadata |
+| `update_items` | Set the language and description of books (writes) | metadata |
 
-Default toolsets: `libraries`, `items`, `playback`. The `browse` and `chapters` toolsets are opt-in via `AUDIOBOOKSHELF_TOOLSETS`.
+Default toolsets: `libraries`, `items`, `playback`. The `browse`, `chapters` and `metadata` toolsets are opt-in via `AUDIOBOOKSHELF_TOOLSETS`.
 
 ### Fixing chapters
 
 With the `chapters` toolset enabled, ask things like *"Fix the chapters for Katabasis"*. The assistant reads the book's current chapters, searches Audible for the edition whose runtime matches your files, fetches its chapters, replaces generic titles ("Chapter 1, 2, 3") with real ones, and shows you the list before saving. When Audible has no match, it can build the list from its own research or from timestamps you give it. Every save returns the previous chapters, so a change can be undone, as long as those old chapters were valid (old chapters that run past the end of the book, for example, cannot be saved back).
+
+### Cleaning up genres, tags and descriptions
+
+With the `metadata` toolset enabled, ask things like *"Make my genres consistent"* or *"Fix the descriptions of the Harry Hole books"*. The assistant surveys the library with `get_metadata_overview`, proposes a mapping from the old genres or tags to the new ones, and shows you the affected books. After you say yes, it removes the old value and adds the new one. For descriptions it looks up real ones with `search_book_metadata`, shows each change from old to new, and tells you when it wrote a description itself. Every write returns the previous values, so a change can be undone.
 
 ---
 
@@ -181,13 +193,18 @@ Add to `~/.config/opencode/config.json`:
 |---|---|---|---|
 | `AUDIOBOOKSHELF_URL` | Yes | — | Your Audiobookshelf server URL |
 | `AUDIOBOOKSHELF_TOKEN` | Yes | — | API token from Settings → Users |
-| `AUDIOBOOKSHELF_TOOLSETS` | No | `libraries,items,playback` | Comma-separated toolsets to enable: `libraries`, `items`, `playback`, `browse`, `chapters`. Use `all` to enable everything, including the `chapters` write tools. |
+| `AUDIOBOOKSHELF_TOOLSETS` | No | `libraries,items,playback` | Comma-separated toolsets to enable: `libraries`, `items`, `playback`, `browse`, `chapters`, `metadata`. Use `all` to enable everything, including the `chapters` and `metadata` write tools. |
 
 ---
 
 ## Security
 
-The default toolsets are **read-only**. Only the opt-in `chapters` toolset writes: `set_chapters` and `rename_chapters` replace a book's chapters. They need an API token whose user has the **Update** permission in Audiobookshelf, are annotated as destructive so MCP clients ask before running them, and return the previous chapters so a change can be undone when those old chapters were valid. `all` includes these write tools; list toolsets explicitly to stay read-only. No tool deletes items, controls playback, or manages users. The API token is passed via environment variable, never logged or exposed.
+The default toolsets are **read-only**. Two opt-in toolsets write, and both need an API token whose user has the **Update** permission in Audiobookshelf. Neither needs admin.
+
+- `chapters`: `set_chapters` and `rename_chapters` replace a book's chapters. They are annotated as destructive so MCP clients ask before running them, and return the previous chapters so a change can be undone when those old chapters were valid.
+- `metadata`: `add_genres`, `remove_genres`, `add_tags` and `remove_tags` add and remove genres and tags, and `update_items` sets language and description. The remove tools and `update_items` are annotated as destructive. Every write can be undone: the list tools by calling the opposite tool, `update_items` by passing the `previous` values it returns.
+
+`all` includes every write tool; list toolsets explicitly to stay read-only. No tool deletes items, controls playback, or manages users. The API token is passed via environment variable, never logged or exposed.
 
 ## License
 

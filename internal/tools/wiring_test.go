@@ -37,6 +37,7 @@ func (s *wiringSuite) StartServer() {
 		Playback:  service.NewPlayback(client),
 		Browse:    service.NewBrowse(client),
 		Chapters:  service.NewChapters(client),
+		Metadata:  service.NewMetadata(client),
 	}
 }
 

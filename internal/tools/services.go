@@ -43,6 +43,18 @@ type ChapterService interface {
 	Rename(ctx context.Context, itemID string, titles []string) (service.ChapterChange, error)
 }
 
+// MetadataService is what the metadata toolset needs from the service layer.
+type MetadataService interface {
+	Overview(ctx context.Context, libraryID string) (service.MetadataOverview, error)
+	Find(ctx context.Context, libraryID string, filter service.ItemFilter, page service.Page) (service.MetadataPage, error)
+	SearchBooks(ctx context.Context, itemID, provider, region, title, author string) (service.MetadataSearch, error)
+	AddGenres(ctx context.Context, itemIDs, genres []string) (service.ListChangeResult, error)
+	RemoveGenres(ctx context.Context, itemIDs, genres []string) (service.ListChangeResult, error)
+	AddTags(ctx context.Context, itemIDs, tags []string) (service.ListChangeResult, error)
+	RemoveTags(ctx context.Context, itemIDs, tags []string) (service.ListChangeResult, error)
+	Update(ctx context.Context, changes []service.ItemChange) (service.UpdateResult, error)
+}
+
 // Services are the services the tools call, one per toolset.
 type Services struct {
 	Libraries LibraryService
@@ -50,4 +62,5 @@ type Services struct {
 	Playback  PlaybackService
 	Browse    BrowseService
 	Chapters  ChapterService
+	Metadata  MetadataService
 }
