@@ -160,8 +160,8 @@ func caseConflict(existing string, adding []string) string {
 //
 // If the save fails, Now is empty, Previous is kept, and the error wraps
 // [ErrWriteIncomplete] and the API error. If only the second read fails,
-// the save went through: its error is returned as it is, with Changed and
-// Previous set.
+// the save went through: Now is empty, Changed and Previous are kept, and
+// the error wraps [ErrReadBack] and the read's error.
 func (s *Metadata) Update(ctx context.Context, changes []ItemChange) (UpdateResult, error) {
 	changes, ids, err := checkChanges(changes)
 	if err != nil {
@@ -186,7 +186,7 @@ func (s *Metadata) Update(ctx context.Context, changes []ItemChange) (UpdateResu
 	res.Changed = n
 	after, err := s.readBooks(ctx, ids)
 	if err != nil {
-		return res, err
+		return res, fmt.Errorf("%w: %w", ErrReadBack, err)
 	}
 	for i, c := range changes {
 		res.Items[i].Now = storedFields(after[i], c)

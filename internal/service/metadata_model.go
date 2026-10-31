@@ -180,6 +180,9 @@ var (
 	ErrNoValues            = errors.New("no values given")
 	ErrBadPage             = errors.New("bad page")
 	ErrWriteIncomplete     = errors.New("the write failed; some books may already be saved")
+	// ErrReadBack is a write that went through, followed by a failed read of
+	// the books for their new values; the previous values are still known.
+	ErrReadBack = errors.New("the books were saved, but reading them back failed")
 )
 
 // ValueError reports a value that fails the checks before saving.

@@ -481,8 +481,12 @@ func TestUpdate_RereadFails(t *testing.T) {
 
 	got, err := NewMetadata(api).Update(t.Context(), []ItemChange{{ItemID: "li_1", Language: new("Russian")}})
 
-	// The write went through, so this is not an incomplete write.
-	assert.Equal(t, errAPI, err)
+	// The write went through, so this is a failed read-back, not an
+	// incomplete write, and Previous still allows an undo.
+	require.ErrorIs(t, err, ErrReadBack)
+	require.ErrorIs(t, err, errAPI)
+	require.NotErrorIs(t, err, ErrWriteIncomplete)
+	require.EqualError(t, err, "the books were saved, but reading them back failed: ABS API 500: boom")
 	assert.Equal(t, UpdateResult{Changed: 1, Items: []ItemUpdateResult{{
 		ItemID: "li_1", Title: "Solaris", Previous: ItemFields{Language: new("English")},
 	}}}, got)
