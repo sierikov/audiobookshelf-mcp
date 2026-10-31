@@ -12,34 +12,55 @@ import (
 	"github.com/sierikov/audiobookshelf-mcp/internal/service"
 )
 
-// listChanges is a result with one changed and one unchanged book.
-func listChanges() service.ListChangeResult {
+// addedChanges is an add result with one changed and one unchanged book; the
+// unchanged one has nil lists, which show as [].
+func addedChanges() service.ListChangeResult {
 	return service.ListChangeResult{
 		Changed: 1,
 		Items: []service.ListChange{
-			{ItemID: "li_1", Title: "Dune", Previous: []string{"Fantasy"}, Now: []string{"Fantasy", "Science Fiction"}},
-			{ItemID: "li_2", Title: "Emma", Previous: nil, Now: nil},
+			{ItemID: "li_1", Title: "Dune", Previous: []string{"Fantasy"}, Now: []string{"Fantasy", "Science Fiction"}, Values: []string{"Science Fiction"}},
+			{ItemID: "li_2", Title: "Emma"},
 		},
 	}
 }
 
-const listChangesJSON = `{
+const addedChangesJSON = `{
 	"changed":1,
 	"items":[
-		{"itemId":"li_1","title":"Dune","previous":["Fantasy"],"now":["Fantasy","Science Fiction"]},
-		{"itemId":"li_2","title":"Emma","previous":[],"now":[]}
+		{"itemId":"li_1","title":"Dune","previous":["Fantasy"],"now":["Fantasy","Science Fiction"],"added":["Science Fiction"]},
+		{"itemId":"li_2","title":"Emma","previous":[],"now":[],"added":[]}
+	]
+}`
+
+// removedChanges is a remove result with one changed and one unchanged book;
+// the unchanged one has nil lists, which show as [].
+func removedChanges() service.ListChangeResult {
+	return service.ListChangeResult{
+		Changed: 1,
+		Items: []service.ListChange{
+			{ItemID: "li_1", Title: "Dune", Previous: []string{"Fantasy", "Science Fiction"}, Now: []string{"Science Fiction"}, Values: []string{"Fantasy"}},
+			{ItemID: "li_2", Title: "Emma"},
+		},
+	}
+}
+
+const removedChangesJSON = `{
+	"changed":1,
+	"items":[
+		{"itemId":"li_1","title":"Dune","previous":["Fantasy","Science Fiction"],"now":["Science Fiction"],"removed":["Fantasy"]},
+		{"itemId":"li_2","title":"Emma","previous":[],"now":[],"removed":[]}
 	]
 }`
 
 func TestAddGenres(t *testing.T) {
 	svc := NewMockMetadataService(t)
-	svc.EXPECT().AddGenres(mock.Anything, []string{"li_1", "li_2"}, []string{"Science Fiction"}).Return(listChanges(), nil)
+	svc.EXPECT().AddGenres(mock.Anything, []string{"li_1", "li_2"}, []string{"Science Fiction"}).Return(addedChanges(), nil)
 
 	result := call(t, MetadataTools(svc), "add_genres", map[string]any{
 		"itemIds": []any{"li_1", "li_2"}, "genres": []any{"Science Fiction"},
 	})
 
-	assertJSON(t, listChangesJSON, result)
+	assertJSON(t, addedChangesJSON, result)
 }
 
 func TestAddGenres_Error(t *testing.T) {
@@ -53,13 +74,13 @@ func TestAddGenres_Error(t *testing.T) {
 
 func TestRemoveGenres(t *testing.T) {
 	svc := NewMockMetadataService(t)
-	svc.EXPECT().RemoveGenres(mock.Anything, []string{"li_1", "li_2"}, []string{"Fantasy"}).Return(listChanges(), nil)
+	svc.EXPECT().RemoveGenres(mock.Anything, []string{"li_1", "li_2"}, []string{"Fantasy"}).Return(removedChanges(), nil)
 	svc.EXPECT().RemoveGenres(mock.Anything, []string{"li_3"}, []string{"x"}).Return(service.ListChangeResult{}, errBoom)
 
 	result := call(t, MetadataTools(svc), "remove_genres", map[string]any{
 		"itemIds": []any{"li_1", "li_2"}, "genres": []any{"Fantasy"},
 	})
-	assertJSON(t, listChangesJSON, result)
+	assertJSON(t, removedChangesJSON, result)
 
 	result = call(t, MetadataTools(svc), "remove_genres", map[string]any{"itemIds": []any{"li_3"}, "genres": []any{"x"}})
 	assertToolError(t, "failed to remove genres: ABS API 500: boom", result)
@@ -67,13 +88,13 @@ func TestRemoveGenres(t *testing.T) {
 
 func TestAddTags(t *testing.T) {
 	svc := NewMockMetadataService(t)
-	svc.EXPECT().AddTags(mock.Anything, []string{"li_1", "li_2"}, []string{"to-read"}).Return(listChanges(), nil)
+	svc.EXPECT().AddTags(mock.Anything, []string{"li_1", "li_2"}, []string{"to-read"}).Return(addedChanges(), nil)
 	svc.EXPECT().AddTags(mock.Anything, []string{"li_3"}, []string{"x"}).Return(service.ListChangeResult{}, errBoom)
 
 	result := call(t, MetadataTools(svc), "add_tags", map[string]any{
 		"itemIds": []any{"li_1", "li_2"}, "tags": []any{"to-read"},
 	})
-	assertJSON(t, listChangesJSON, result)
+	assertJSON(t, addedChangesJSON, result)
 
 	result = call(t, MetadataTools(svc), "add_tags", map[string]any{"itemIds": []any{"li_3"}, "tags": []any{"x"}})
 	assertToolError(t, "failed to add tags: ABS API 500: boom", result)
@@ -81,13 +102,13 @@ func TestAddTags(t *testing.T) {
 
 func TestRemoveTags(t *testing.T) {
 	svc := NewMockMetadataService(t)
-	svc.EXPECT().RemoveTags(mock.Anything, []string{"li_1", "li_2"}, []string{"to-read"}).Return(listChanges(), nil)
+	svc.EXPECT().RemoveTags(mock.Anything, []string{"li_1", "li_2"}, []string{"to-read"}).Return(removedChanges(), nil)
 	svc.EXPECT().RemoveTags(mock.Anything, []string{"li_3"}, []string{"x"}).Return(service.ListChangeResult{}, errBoom)
 
 	result := call(t, MetadataTools(svc), "remove_tags", map[string]any{
 		"itemIds": []any{"li_1", "li_2"}, "tags": []any{"to-read"},
 	})
-	assertJSON(t, listChangesJSON, result)
+	assertJSON(t, removedChangesJSON, result)
 
 	result = call(t, MetadataTools(svc), "remove_tags", map[string]any{"itemIds": []any{"li_3"}, "tags": []any{"x"}})
 	assertToolError(t, "failed to remove tags: ABS API 500: boom", result)

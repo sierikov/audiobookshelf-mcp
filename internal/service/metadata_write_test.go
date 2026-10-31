@@ -77,9 +77,32 @@ func TestAddGenres(t *testing.T) {
 		{"id":"li_3","mediaPayload":{"metadata":{"genres":["Science Fiction"]}}}
 	]`, *sent)
 	assert.Equal(t, ListChangeResult{Changed: 2, Items: []ListChange{
-		{ItemID: "li_1", Title: "Solaris", Previous: []string{"Научная фантастика"}, Now: []string{"Научная фантастика", "Science Fiction"}},
-		{ItemID: "li_2", Title: "Dune", Previous: []string{"Science Fiction"}, Now: []string{"Science Fiction"}},
-		{ItemID: "li_3", Title: "Untitled", Previous: []string{}, Now: []string{"Science Fiction"}},
+		{
+			ItemID: "li_1", Title: "Solaris", Previous: []string{"Научная фантастика"},
+			Now: []string{"Научная фантастика", "Science Fiction"}, Values: []string{"Science Fiction"},
+		},
+		{ItemID: "li_2", Title: "Dune", Previous: []string{"Science Fiction"}, Now: []string{"Science Fiction"}, Values: []string{}},
+		{ItemID: "li_3", Title: "Untitled", Previous: []string{}, Now: []string{"Science Fiction"}, Values: []string{"Science Fiction"}},
+	}}, got)
+}
+
+func TestAddGenres_PartialOverlap(t *testing.T) {
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1", "li_2"}).Return([]abs.LibraryItem{
+		listBook("li_1", "Solaris", []string{"Thriller"}, nil),
+		listBook("li_2", "Dune", []string{"Horror", "Thriller"}, nil),
+	}, nil)
+	sent := recordUpdates(api, 1)
+
+	got, err := NewMetadata(api).AddGenres(t.Context(), []string{"li_1", "li_2"}, []string{"Thriller", "Horror"})
+
+	require.NoError(t, err)
+	assertSentJSON(t, `[{"id":"li_1","mediaPayload":{"metadata":{"genres":["Thriller","Horror"]}}}]`, *sent)
+	// Values is only what this call added, so undoing it with remove_genres
+	// keeps the Thriller that li_1 had before.
+	assert.Equal(t, ListChangeResult{Changed: 1, Items: []ListChange{
+		{ItemID: "li_1", Title: "Solaris", Previous: []string{"Thriller"}, Now: []string{"Thriller", "Horror"}, Values: []string{"Horror"}},
+		{ItemID: "li_2", Title: "Dune", Previous: []string{"Horror", "Thriller"}, Now: []string{"Horror", "Thriller"}, Values: []string{}},
 	}}, got)
 }
 
@@ -107,6 +130,13 @@ func TestAddGenres_CaseConflict(t *testing.T) {
 			},
 			genres: []string{"Horror", "Fiction"},
 			want:   `item 2 (li_1): already has "fiction"; remove it before adding "Fiction"`,
+		},
+		{
+			name:   "stored with surrounding spaces",
+			ids:    []string{"li_1"},
+			books:  []abs.LibraryItem{listBook("li_1", "Solaris", []string{"fiction "}, nil)},
+			genres: []string{"Fiction"},
+			want:   `item 1 (li_1): already has "fiction "; remove it before adding "Fiction"`,
 		},
 	}
 	for _, tt := range tests {
@@ -138,7 +168,33 @@ func TestRemoveGenres_LastValueSendsEmptyList(t *testing.T) {
 	}, *sent)
 	assertSentJSON(t, `[{"id":"li_1","mediaPayload":{"metadata":{"genres":[]}}}]`, *sent)
 	assert.Equal(t, ListChangeResult{Changed: 1, Items: []ListChange{
-		{ItemID: "li_1", Title: "Songs", Previous: []string{"Vocal"}, Now: []string{}},
+		{ItemID: "li_1", Title: "Songs", Previous: []string{"Vocal"}, Now: []string{}, Values: []string{"Vocal"}},
+	}}, got)
+}
+
+func TestRemoveGenres_PartialOverlap(t *testing.T) {
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1", "li_2"}).Return([]abs.LibraryItem{
+		listBook("li_1", "Solaris", []string{"Mystery"}, nil),
+		listBook("li_2", "Dune", []string{"Suspense", "Drama", "Mystery"}, nil),
+	}, nil)
+	sent := recordUpdates(api, 2)
+
+	got, err := NewMetadata(api).RemoveGenres(t.Context(), []string{"li_1", "li_2"}, []string{"Mystery", "Suspense"})
+
+	require.NoError(t, err)
+	assertSentJSON(t, `[
+		{"id":"li_1","mediaPayload":{"metadata":{"genres":[]}}},
+		{"id":"li_2","mediaPayload":{"metadata":{"genres":["Drama"]}}}
+	]`, *sent)
+	// Values is only what each book lost, in the order asked, so undoing it
+	// with add_genres does not give li_1 a Suspense it never had.
+	assert.Equal(t, ListChangeResult{Changed: 2, Items: []ListChange{
+		{ItemID: "li_1", Title: "Solaris", Previous: []string{"Mystery"}, Now: []string{}, Values: []string{"Mystery"}},
+		{
+			ItemID: "li_2", Title: "Dune", Previous: []string{"Suspense", "Drama", "Mystery"},
+			Now: []string{"Drama"}, Values: []string{"Mystery", "Suspense"},
+		},
 	}}, got)
 }
 
@@ -153,8 +209,8 @@ func TestRemoveGenres_NothingToRemove(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, ListChangeResult{Items: []ListChange{
-		{ItemID: "li_1", Title: "Solaris", Previous: []string{"Fiction"}, Now: []string{"Fiction"}},
-		{ItemID: "li_2", Title: "Untitled", Previous: []string{}, Now: []string{}},
+		{ItemID: "li_1", Title: "Solaris", Previous: []string{"Fiction"}, Now: []string{"Fiction"}, Values: []string{}},
+		{ItemID: "li_2", Title: "Untitled", Previous: []string{}, Now: []string{}, Values: []string{}},
 	}}, got)
 	api.AssertNotCalled(t, "UpdateItems", mock.Anything, mock.Anything)
 }
@@ -179,8 +235,8 @@ func TestAddTags(t *testing.T) {
 		{"id":"li_2","mediaPayload":{"tags":["favourite"]}}
 	]`, *sent)
 	assert.Equal(t, ListChangeResult{Changed: 2, Items: []ListChange{
-		{ItemID: "li_1", Title: "Solaris", Previous: []string{"classic"}, Now: []string{"classic", "favourite"}},
-		{ItemID: "li_2", Title: "Untitled", Previous: []string{}, Now: []string{"favourite"}},
+		{ItemID: "li_1", Title: "Solaris", Previous: []string{"classic"}, Now: []string{"classic", "favourite"}, Values: []string{"favourite"}},
+		{ItemID: "li_2", Title: "Untitled", Previous: []string{}, Now: []string{"favourite"}, Values: []string{"favourite"}},
 	}}, got)
 }
 
@@ -196,7 +252,7 @@ func TestRemoveTags(t *testing.T) {
 	assert.Equal(t, []abs.ItemUpdate{{ID: "li_1", MediaPayload: abs.MediaPayload{Tags: &[]string{}}}}, *sent)
 	assertSentJSON(t, `[{"id":"li_1","mediaPayload":{"tags":[]}}]`, *sent)
 	assert.Equal(t, ListChangeResult{Changed: 1, Items: []ListChange{
-		{ItemID: "li_1", Title: "Songs", Previous: []string{"Vocal"}, Now: []string{}},
+		{ItemID: "li_1", Title: "Songs", Previous: []string{"Vocal"}, Now: []string{}, Values: []string{"Vocal"}},
 	}}, got)
 }
 
@@ -302,6 +358,7 @@ func TestListWrites_WriteFails(t *testing.T) {
 			require.ErrorIs(t, err, ErrWriteIncomplete)
 			require.ErrorIs(t, err, errAPI)
 			require.EqualError(t, err, "the write failed; some books may already be saved: ABS API 500: boom")
+			// Now and Values are nil: what was saved is unknown.
 			assert.Equal(t, ListChangeResult{Items: []ListChange{
 				{ItemID: "li_1", Title: "Solaris", Previous: []string{"Fiction"}},
 				{ItemID: "li_2", Title: "Untitled", Previous: []string{}},

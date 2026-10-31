@@ -17,7 +17,8 @@ func (s *Metadata) AddGenres(ctx context.Context, itemIDs, genres []string) (Lis
 }
 
 // RemoveGenres removes genres from books, as [Metadata.changeLists]
-// describes. Genres match exactly; a book without them is left unchanged.
+// describes. Genres match exactly, ignoring the spaces around a stored one;
+// a book without them is left unchanged.
 func (s *Metadata) RemoveGenres(ctx context.Context, itemIDs, genres []string) (ListChangeResult, error) {
 	return s.changeLists(ctx, itemIDs, genres, genresList, removeFromList)
 }
@@ -30,7 +31,8 @@ func (s *Metadata) AddTags(ctx context.Context, itemIDs, tags []string) (ListCha
 }
 
 // RemoveTags removes tags from books, as [Metadata.changeLists] describes.
-// Tags match exactly; a book without them is left unchanged.
+// Tags match exactly, ignoring the spaces around a stored one; a book
+// without them is left unchanged.
 func (s *Metadata) RemoveTags(ctx context.Context, itemIDs, tags []string) (ListChangeResult, error) {
 	return s.changeLists(ctx, itemIDs, tags, tagsList, removeFromList)
 }
@@ -71,11 +73,14 @@ const (
 	removeFromList
 )
 
-// apply returns current after the op, never nil. On add it also returns the
-// value current has in another case of a value being added, or "".
-func (op listOp) apply(current, values []string) (list []string, conflict string) {
+// apply returns current after the op and the values the op added or
+// removed, in the order of values; neither is ever nil. On add it also
+// returns the value current has, as stored, in another case of a value being
+// added, or "". Stored values match without their surrounding spaces.
+func (op listOp) apply(current, values []string) (list, changed []string, conflict string) {
 	if op == removeFromList {
-		return removeValues(current, values), ""
+		list, changed = removeValues(current, values)
+		return list, changed, ""
 	}
 	return addValues(current, values)
 }
@@ -92,9 +97,10 @@ func (op listOp) apply(current, values []string) (list []string, conflict string
 //
 // Only the books whose list changed are saved, in one call carrying just
 // that list; if none changed, nothing is sent. Changed counts those books,
-// and Items has every book in the order given. If the save fails, Now is
-// nil throughout, Previous is kept, and the error wraps
-// [ErrWriteIncomplete] and the API error.
+// and Items has every book in the order given, each with the values it
+// gained or lost in Values, so the opposite call with those values undoes
+// it. If the save fails, Now and Values are nil throughout, Previous is
+// kept, and the error wraps [ErrWriteIncomplete] and the API error.
 func (s *Metadata) changeLists(ctx context.Context, itemIDs, values []string, field listField, op listOp) (ListChangeResult, error) {
 	ids, err := checkItemIDs(itemIDs)
 	if err != nil {
@@ -111,11 +117,11 @@ func (s *Metadata) changeLists(ctx context.Context, itemIDs, values []string, fi
 	updates := make([]abs.ItemUpdate, 0, len(ids))
 	for i, b := range books {
 		previous := field.of(b)
-		now, conflict := op.apply(previous, values)
+		now, changed, conflict := op.apply(previous, values)
 		if conflict != "" {
 			return ListChangeResult{}, &ItemError{Position: i + 1, ItemID: ids[i], Reason: caseConflict(conflict, values)}
 		}
-		res.Items[i] = ListChange{ItemID: ids[i], Title: b.Metadata.Title, Previous: previous, Now: now}
+		res.Items[i] = ListChange{ItemID: ids[i], Title: b.Metadata.Title, Previous: previous, Now: now, Values: changed}
 		if !slices.Equal(previous, now) {
 			updates = append(updates, abs.ItemUpdate{ID: ids[i], MediaPayload: field.payload(now)})
 		}
@@ -125,7 +131,7 @@ func (s *Metadata) changeLists(ctx context.Context, itemIDs, values []string, fi
 	}
 	if _, err := s.api.UpdateItems(ctx, updates); err != nil {
 		for i := range res.Items {
-			res.Items[i].Now = nil
+			res.Items[i].Now, res.Items[i].Values = nil, nil
 		}
 		return res, fmt.Errorf("%w: %w", ErrWriteIncomplete, err)
 	}
@@ -133,11 +139,12 @@ func (s *Metadata) changeLists(ctx context.Context, itemIDs, values []string, fi
 	return res, nil
 }
 
-// caseConflict says that a book has existing, which differs only in case
-// from one of the values being added. addValues found existing by matching
-// one of adding ignoring case, so the search below always finds it.
+// caseConflict says that a book has existing, as stored, which differs only
+// in case from one of the values being added. addValues found existing by
+// matching its trimmed form to one of adding ignoring case, so the search
+// below always finds it.
 func caseConflict(existing string, adding []string) string {
-	i := slices.IndexFunc(adding, func(v string) bool { return strings.EqualFold(v, existing) })
+	i := slices.IndexFunc(adding, func(v string) bool { return strings.EqualFold(v, strings.TrimSpace(existing)) })
 	return fmt.Sprintf("already has %q; remove it before adding %q", existing, adding[i])
 }
 

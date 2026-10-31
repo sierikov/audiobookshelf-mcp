@@ -6,10 +6,10 @@
 // This package is wiring only. Each tool declares its schema, parses its
 // arguments, makes one call to the service layer through a small interface
 // ([LibraryService], [ItemService], [PlaybackService], [BrowseService],
-// [ChapterService], [MetadataService]), and maps the result to its JSON output, formatting
-// durations, progress and dates for people along the way. The logic lives in the service package and
-// HTTP lives in the abs package; this package imports neither the client nor
-// its types.
+// [ChapterService], [MetadataService]), and maps the result to its JSON
+// output, formatting durations, progress and dates for people along the way.
+// The logic lives in the service package and HTTP lives in the abs package;
+// this package imports neither the client nor its types.
 //
 // # Toolsets
 //
@@ -44,8 +44,11 @@
 //
 // The metadata toolset adds and removes genres and tags, and sets language and
 // description. Its remove tools and update_items are annotated destructive.
-// Every write can be undone: the list tools by calling the opposite tool,
-// update_items by passing the previous values it returns.
+// Every write can be undone: the list tools by calling the opposite tool with
+// each book's added or removed values, update_items by passing the previous
+// values it returns. Audiobookshelf can limit what a user sees by tag, so
+// add_tags and remove_tags can change what a restricted user, such as a kids
+// account, can see.
 //
 // "all" includes every write tool. No tool deletes items, controls playback,
 // or manages users.

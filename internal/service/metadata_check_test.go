@@ -124,33 +124,41 @@ func TestAddValues(t *testing.T) {
 	tests := []struct {
 		name         string
 		current, add []string
-		want         []string
+		want, added  []string
 		conflict     string
 	}{
-		{"into nil", nil, []string{"A"}, []string{"A"}, ""},
-		{"skips present", []string{"A"}, []string{"A", "B"}, []string{"A", "B"}, ""},
-		{"case conflict", []string{"fiction"}, []string{"Fiction"}, []string{"fiction", "Fiction"}, "fiction"},
+		{"into nil", nil, []string{"A"}, []string{"A"}, []string{"A"}, ""},
+		{"skips present", []string{"A"}, []string{"A", "B"}, []string{"A", "B"}, []string{"B"}, ""},
+		{"all present", []string{"A", "B"}, []string{"B", "A"}, []string{"A", "B"}, []string{}, ""},
+		{"added in request order", []string{"B"}, []string{"C", "B", "A"}, []string{"B", "C", "A"}, []string{"C", "A"}, ""},
+		{"case conflict", []string{"fiction"}, []string{"Fiction"}, []string{"fiction", "Fiction"}, []string{"Fiction"}, "fiction"},
+		{"stored with spaces is present", []string{"Fiction "}, []string{"Fiction"}, []string{"Fiction "}, []string{}, ""},
+		{"case conflict with stored spaces names the stored value", []string{"fiction "}, []string{"Fiction"},
+			[]string{"fiction ", "Fiction"}, []string{"Fiction"}, "fiction "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, conflict := addValues(tt.current, tt.add)
+			got, added, conflict := addValues(tt.current, tt.add)
 
 			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.added, added)
 			assert.Equal(t, tt.conflict, conflict)
 		})
 	}
 
 	t.Run("never nil", func(t *testing.T) {
-		got, _ := addValues(nil, nil)
+		got, added, _ := addValues(nil, nil)
 
 		assert.NotNil(t, got)
 		assert.Empty(t, got)
+		assert.NotNil(t, added)
+		assert.Empty(t, added)
 	})
 	t.Run("does not change the input", func(t *testing.T) {
 		backing := []string{"A", ""}
 		current := backing[:1]
 
-		got, _ := addValues(current, []string{"B"})
+		got, _, _ := addValues(current, []string{"B"})
 
 		assert.Equal(t, []string{"A", "B"}, got)
 		assert.Equal(t, []string{"A"}, current)
@@ -162,19 +170,23 @@ func TestRemoveValues(t *testing.T) {
 	tests := []struct {
 		name            string
 		current, remove []string
-		want            []string
+		want, removed   []string
 	}{
-		{"drops match", []string{"A", "B"}, []string{"A"}, []string{"B"}},
-		{"to empty", []string{"A"}, []string{"A"}, []string{}},
-		{"from nil", nil, []string{"A"}, []string{}},
-		{"exact match only", []string{"Fiction"}, []string{"fiction"}, []string{"Fiction"}},
+		{"drops match", []string{"A", "B"}, []string{"A"}, []string{"B"}, []string{"A"}},
+		{"to empty", []string{"A"}, []string{"A"}, []string{}, []string{"A"}},
+		{"from nil", nil, []string{"A"}, []string{}, []string{}},
+		{"exact match only", []string{"Fiction"}, []string{"fiction"}, []string{"Fiction"}, []string{}},
+		{"removed in request order", []string{"B", "A", "C"}, []string{"A", "D", "B"}, []string{"C"}, []string{"A", "B"}},
+		{"stored with spaces matches", []string{"Fiction "}, []string{"Fiction"}, []string{}, []string{"Fiction"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := removeValues(tt.current, tt.remove)
+			got, removed := removeValues(tt.current, tt.remove)
 
 			assert.NotNil(t, got)
 			assert.Equal(t, tt.want, got)
+			assert.NotNil(t, removed)
+			assert.Equal(t, tt.removed, removed)
 		})
 	}
 }
@@ -253,6 +265,11 @@ func TestCountValues(t *testing.T) {
 		got := countValues([][]string{{"B"}, {"A"}})
 
 		assert.Equal(t, []ValueCount{{Name: "A", Count: 1}, {Name: "B", Count: 1}}, got)
+	})
+	t.Run("a value twice in one book counts once", func(t *testing.T) {
+		got := countValues([][]string{{"Horror", "Horror"}, {"Horror"}})
+
+		assert.Equal(t, []ValueCount{{Name: "Horror", Count: 2}}, got)
 	})
 	t.Run("nothing", func(t *testing.T) {
 		assert.Empty(t, countValues(nil))

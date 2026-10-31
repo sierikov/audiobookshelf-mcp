@@ -26,7 +26,7 @@ Ask your AI assistant things like:
 | `list_libraries` | List all libraries | libraries |
 | `search_library` | Search by title, author, or narrator | libraries |
 | `list_library_items` | List items with pagination | libraries |
-| `get_item` | Get detailed info about an audiobook or podcast | items |
+| `get_item` | Get detailed info about an audiobook or podcast, including its tags | items |
 | `get_items_in_progress` | Get currently listening items with progress | items |
 | `get_listening_stats` | Total listening time and daily breakdown | playback |
 | `get_listening_sessions` | Recent listening sessions | playback |
@@ -57,7 +57,7 @@ With the `chapters` toolset enabled, ask things like *"Fix the chapters for Kata
 
 ### Cleaning up genres, tags and descriptions
 
-With the `metadata` toolset enabled, ask things like *"Make my genres consistent"* or *"Fix the descriptions of the Harry Hole books"*. The assistant surveys the library with `get_metadata_overview`, proposes a mapping from the old genres or tags to the new ones, and shows you the affected books. After you say yes, it removes the old value and adds the new one. For descriptions it looks up real ones with `search_book_metadata`, shows each change from old to new, and tells you when it wrote a description itself. Every write returns the previous values, so a change can be undone.
+With the `metadata` toolset enabled, ask things like *"Make my genres consistent"* or *"Fix the descriptions of the Harry Hole books"*. The assistant surveys the library with `get_metadata_overview`, proposes a mapping from the old genres or tags to the new ones, and shows you the affected books. After you say yes, it removes the old value and adds the new one. For descriptions it looks up real ones with `search_book_metadata`, shows each change from old to new, and tells you when it wrote a description itself. Every write returns what it changed, so a change can be undone: the genre and tag tools list each book's `added` or `removed` values, and `update_items` returns the `previous` values.
 
 ---
 
@@ -202,7 +202,7 @@ Add to `~/.config/opencode/config.json`:
 The default toolsets are **read-only**. Two opt-in toolsets write, and both need an API token whose user has the **Update** permission in Audiobookshelf. Neither needs admin.
 
 - `chapters`: `set_chapters` and `rename_chapters` replace a book's chapters. They are annotated as destructive so MCP clients ask before running them, and return the previous chapters so a change can be undone when those old chapters were valid.
-- `metadata`: `add_genres`, `remove_genres`, `add_tags` and `remove_tags` add and remove genres and tags, and `update_items` sets language and description. The remove tools and `update_items` are annotated as destructive. Every write can be undone: the list tools by calling the opposite tool, `update_items` by passing the `previous` values it returns.
+- `metadata`: `add_genres`, `remove_genres`, `add_tags` and `remove_tags` add and remove genres and tags, and `update_items` sets language and description. The remove tools and `update_items` are annotated as destructive. Every write can be undone: the list tools by calling the opposite tool with each book's `added` or `removed` values, `update_items` by passing the `previous` values it returns. Audiobookshelf can limit what a user sees by tag, so `add_tags` and `remove_tags` can change what a restricted user, such as a kids account, can see.
 
 `all` includes every write tool; list toolsets explicitly to stay read-only. No tool deletes items, controls playback, or manages users. The API token is passed via environment variable, never logged or exposed.
 

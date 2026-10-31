@@ -71,35 +71,53 @@ func checkValues(values []string) ([]string, error) {
 	return out, nil
 }
 
+// hasValue reports whether list holds v, a trimmed value. Stored values are
+// compared without their surrounding spaces, which Audiobookshelf's scanner
+// can leave, but otherwise exactly, so case matters.
+func hasValue(list []string, v string) bool {
+	return slices.ContainsFunc(list, func(e string) bool { return strings.TrimSpace(e) == v })
+}
+
 // addValues returns current with each of add appended unless it is already
-// there exactly. It also returns the existing value that differs only in
-// case from one being added, or "" if there is none. The result is never nil.
-func addValues(current, add []string) (list []string, conflict string) {
+// there, as [hasValue] matches, and the values it appended, in the order of
+// add. It also returns the existing value, as stored, that differs only in
+// case from one being added once its surrounding spaces are removed, or ""
+// if there is none. Neither list is ever nil.
+func addValues(current, add []string) (list, added []string, conflict string) {
 	list = append([]string{}, current...)
+	added = []string{}
 	for _, v := range add {
-		if slices.Contains(list, v) {
+		if hasValue(list, v) {
 			continue
 		}
 		if conflict == "" {
-			if i := slices.IndexFunc(list, func(e string) bool { return strings.EqualFold(e, v) }); i >= 0 {
+			if i := slices.IndexFunc(list, func(e string) bool { return strings.EqualFold(strings.TrimSpace(e), v) }); i >= 0 {
 				conflict = list[i]
 			}
 		}
 		list = append(list, v)
+		added = append(added, v)
 	}
-	return list, conflict
+	return list, added, conflict
 }
 
-// removeValues returns current without the values in remove, matched exactly.
-// The result is never nil.
-func removeValues(current, remove []string) []string {
-	out := make([]string, 0, len(current))
+// removeValues returns current without the values in remove, as [hasValue]
+// matches them, and the values of remove it dropped, in the order of
+// remove. Neither list is ever nil.
+func removeValues(current, remove []string) (list, removed []string) {
+	list = make([]string, 0, len(current))
 	for _, v := range current {
-		if !slices.Contains(remove, v) {
-			out = append(out, v)
+		if !slices.Contains(remove, strings.TrimSpace(v)) {
+			list = append(list, v)
 		}
 	}
-	return out
+	removed = []string{}
+	for _, v := range remove {
+		if hasValue(current, v) {
+			removed = append(removed, v)
+		}
+	}
+	return list, removed
 }
 
 // isMissing reports whether a book lacks the field. A description counts as
@@ -134,12 +152,13 @@ func matchesFilter(m MetadataItem, f ItemFilter) bool {
 	return true
 }
 
-// countValues counts how many lists each value is in, most common first and
-// by name, in byte order, among equals.
+// countValues counts the number of books carrying each value, given each
+// book's list, most common first and by name, in byte order, among equals.
+// A book whose list repeats a value counts once for it.
 func countValues(lists [][]string) []ValueCount {
 	counts := map[string]int{}
 	for _, l := range lists {
-		for _, v := range l {
+		for _, v := range slices.Compact(slices.Sorted(slices.Values(l))) {
 			counts[v]++
 		}
 	}

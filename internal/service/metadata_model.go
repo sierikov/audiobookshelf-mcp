@@ -111,12 +111,16 @@ func MetadataProviders() []string {
 }
 
 // ListChange is the outcome for one book of adding or removing list values:
-// the list before and after.
+// the list before and after, and Values, the values this call added to or
+// removed from the book, in the order they were asked for. Values is empty,
+// never nil, for a book that did not change; like Now, it is nil only when
+// the save failed.
 type ListChange struct {
 	ItemID   string
 	Title    string
 	Previous []string
 	Now      []string
+	Values   []string
 }
 
 // ListChangeResult is the outcome of adding or removing list values. Changed

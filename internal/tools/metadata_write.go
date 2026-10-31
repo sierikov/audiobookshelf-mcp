@@ -33,11 +33,16 @@ func writeFailure[P any](prefix string, err error, previous []previousOutput[P])
 	return errResult(msg)
 }
 
+// listChangeOutput is one book's outcome of a list tool. The add tools set
+// Added and the remove tools set Removed, always non-nil; omitzero leaves out
+// the nil one, while an empty list still shows as [].
 type listChangeOutput struct {
 	ItemID   string   `json:"itemId"`
 	Title    string   `json:"title"`
 	Previous []string `json:"previous"`
 	Now      []string `json:"now"`
+	Added    []string `json:"added,omitzero"`
+	Removed  []string `json:"removed,omitzero"`
 }
 
 type listChangeResultOutput struct {
@@ -45,15 +50,23 @@ type listChangeResultOutput struct {
 	Items   []listChangeOutput `json:"items"`
 }
 
-func toListChanges(items []service.ListChange) []listChangeOutput {
+// toListChanges maps a list tool's books, listing each book's values under
+// removed if removes is set and under added otherwise.
+func toListChanges(items []service.ListChange, removes bool) []listChangeOutput {
 	out := make([]listChangeOutput, 0, len(items))
 	for _, it := range items {
-		out = append(out, listChangeOutput{
+		o := listChangeOutput{
 			ItemID:   it.ItemID,
 			Title:    it.Title,
 			Previous: nonNil(it.Previous),
 			Now:      nonNil(it.Now),
-		})
+		}
+		if removes {
+			o.Removed = nonNil(it.Values)
+		} else {
+			o.Added = nonNil(it.Values)
+		}
+		out = append(out, o)
 	}
 	return out
 }
@@ -75,6 +88,9 @@ type listWrite struct {
 	plural      string
 	noun        string
 	errorPrefix string
+	// removes is set for the remove tools, whose books list the values they
+	// lost under removed; the add tools list the values gained under added.
+	removes     bool
 	annotations *mcp.ToolAnnotations
 	// change is the service method the tool calls, as a method expression, so
 	// the service is not touched until the tool is called.
@@ -112,7 +128,7 @@ func (w listWrite) tool(svc MetadataService) ServerTool {
 				return writeFailure(w.errorPrefix, err, toListPrevious(res.Items))
 			}
 
-			return marshalledResult(listChangeResultOutput{Changed: res.Changed, Items: toListChanges(res.Items)})
+			return marshalledResult(listChangeResultOutput{Changed: res.Changed, Items: toListChanges(res.Items, w.removes)})
 		},
 	}
 }
@@ -130,7 +146,7 @@ func requiredStrings(args map[string]any, name, noun string) ([]string, error) {
 func addGenres(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "add_genres",
-		description: `Add genres to one or more books (up to 100). Genres a book already has are skipped; a genre it has in another case is an error. Show the user the books and the genres and get their confirmation before calling. To rename a genre, call remove_genres with the old name, then add_genres with the new one. To undo, call remove_genres with the same genres on the books that changed.`,
+		description: `Add genres to one or more books (up to 100). Genres a book already has are skipped; a genre it has in another case is an error. Show the user the books and the genres and get their confirmation before calling. To rename a genre, call remove_genres with the old name, then add_genres with the new one. Each changed book lists the genres it gained in added; to undo, call remove_genres with exactly those genres on that book (books with the same added genres can share one call).`,
 		plural:      "genres",
 		noun:        "genre",
 		errorPrefix: "failed to add genres: ",
@@ -142,10 +158,11 @@ func addGenres(svc MetadataService) ServerTool {
 func removeGenres(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "remove_genres",
-		description: `Remove genres from one or more books (up to 100). Matching is exact; books without the genre are left unchanged. Show the user the books and the genres and get their confirmation before calling. To undo, call add_genres with the same genres on the books that changed.`,
+		description: `Remove genres from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the genre are left unchanged. Show the user the books and the genres and get their confirmation before calling. Each changed book lists the genres it lost in removed; to undo, call add_genres with exactly those genres on that book (books with the same removed genres can share one call).`,
 		plural:      "genres",
 		noun:        "genre",
 		errorPrefix: "failed to remove genres: ",
+		removes:     true,
 		annotations: destructiveWriteAnnotations(),
 		change:      MetadataService.RemoveGenres,
 	}.tool(svc)
@@ -154,7 +171,7 @@ func removeGenres(svc MetadataService) ServerTool {
 func addTags(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "add_tags",
-		description: `Add tags to one or more books (up to 100). Tags a book already has are skipped; a tag it has in another case is an error. Show the user the books and the tags and get their confirmation before calling. To rename a tag, call remove_tags with the old name, then add_tags with the new one. To undo, call remove_tags with the same tags on the books that changed.`,
+		description: `Add tags to one or more books (up to 100). Tags a book already has are skipped; a tag it has in another case is an error. Show the user the books and the tags and get their confirmation before calling. To rename a tag, call remove_tags with the old name, then add_tags with the new one. Each changed book lists the tags it gained in added; to undo, call remove_tags with exactly those tags on that book (books with the same added tags can share one call).`,
 		plural:      "tags",
 		noun:        "tag",
 		errorPrefix: "failed to add tags: ",
@@ -166,10 +183,11 @@ func addTags(svc MetadataService) ServerTool {
 func removeTags(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "remove_tags",
-		description: `Remove tags from one or more books (up to 100). Matching is exact; books without the tag are left unchanged. Show the user the books and the tags and get their confirmation before calling. To undo, call add_tags with the same tags on the books that changed.`,
+		description: `Remove tags from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the tag are left unchanged. Show the user the books and the tags and get their confirmation before calling. Each changed book lists the tags it lost in removed; to undo, call add_tags with exactly those tags on that book (books with the same removed tags can share one call).`,
 		plural:      "tags",
 		noun:        "tag",
 		errorPrefix: "failed to remove tags: ",
+		removes:     true,
 		annotations: destructiveWriteAnnotations(),
 		change:      MetadataService.RemoveTags,
 	}.tool(svc)
