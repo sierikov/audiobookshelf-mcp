@@ -45,6 +45,7 @@ func TestItems_Get_Podcast(t *testing.T) {
 	api.EXPECT().Item(mock.Anything, "pod-1").Return(libraryItem("pod-1", abs.MediaTypePodcast, abs.PodcastMedia{
 		Metadata:    abs.PodcastMetadata{Title: "Hardcore History", Author: "Dan Carlin", Description: "History", Genres: []string{"History"}, Language: "en"},
 		NumEpisodes: 68,
+		Tags:        []string{"history"},
 	}), nil)
 
 	detail, err := NewItems(api).Get(context.Background(), "pod-1")
@@ -55,6 +56,7 @@ func TestItems_Get_Podcast(t *testing.T) {
 		Description: "History",
 		Genres:      []string{"History"},
 		Language:    "en",
+		Tags:        []string{"history"},
 		NumEpisodes: 68,
 	}, detail)
 }
@@ -123,4 +125,17 @@ func TestItems_InProgress_ReturnsAPIErrorUnchanged(t *testing.T) {
 	_, err := NewItems(api).InProgress(context.Background(), 5)
 
 	require.Equal(t, errAPI, err)
+}
+
+func TestItemsGet_Tags(t *testing.T) {
+	api := NewMockItemsAPI(t)
+	api.EXPECT().Item(mock.Anything, "item-1").Return(libraryItem("item-1", abs.MediaTypeBook, abs.BookMedia{
+		Metadata: abs.BookMetadata{Title: "Katabasis"},
+		Tags:     []string{"horror"},
+	}), nil)
+
+	detail, err := NewItems(api).Get(context.Background(), "item-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"horror"}, detail.Tags)
 }

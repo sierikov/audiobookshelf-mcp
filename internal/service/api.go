@@ -54,3 +54,14 @@ type ChaptersAPI interface {
 }
 
 var _ ChaptersAPI = (*abs.Client)(nil)
+
+// MetadataAPI is the part of the Audiobookshelf API the Metadata service uses.
+type MetadataAPI interface {
+	LibraryItems(ctx context.Context, libraryID string, page abs.Page, sort string) (abs.ItemsPage, error)
+	Item(ctx context.Context, itemID string) (abs.LibraryItem, error)
+	ItemsByID(ctx context.Context, ids []string) ([]abs.LibraryItem, error)
+	UpdateItems(ctx context.Context, updates []abs.ItemUpdate) (int, error)
+	SearchBooks(ctx context.Context, provider, title, author, itemID string) ([]abs.BookMatch, error)
+}
+
+var _ MetadataAPI = (*abs.Client)(nil)

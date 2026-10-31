@@ -46,6 +46,7 @@ type ItemDetail struct {
 	PublishedYear string
 	Publisher     string
 	Genres        []string
+	Tags          []string
 	Language      string
 	NumEpisodes   int
 }

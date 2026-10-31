@@ -34,7 +34,7 @@ func toItemDetail(li abs.LibraryItem) (ItemDetail, error) {
 		d.Duration, d.HasDuration = seconds(b.Duration), true
 		d.Subtitle, d.Narrator, d.SeriesName = m.Subtitle, m.NarratorName, m.SeriesName
 		d.Description, d.PublishedYear, d.Publisher = m.Description, m.PublishedYear, m.Publisher
-		d.Genres, d.Language = m.Genres, m.Language
+		d.Genres, d.Language, d.Tags = m.Genres, m.Language, b.Tags
 	case abs.MediaTypePodcast:
 		p, err := li.AsPodcast()
 		if err != nil {
@@ -42,7 +42,7 @@ func toItemDetail(li abs.LibraryItem) (ItemDetail, error) {
 		}
 		m := p.Metadata
 		d.Title, d.Author = m.Title, m.Author
-		d.Description, d.Genres, d.Language = m.Description, m.Genres, m.Language
+		d.Description, d.Genres, d.Language, d.Tags = m.Description, m.Genres, m.Language, p.Tags
 		d.NumEpisodes = p.NumEpisodes
 	}
 	return d, nil
