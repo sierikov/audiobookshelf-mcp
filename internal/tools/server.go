@@ -18,18 +18,39 @@ func AllTools(svcs Services) []ServerTool {
 	return tools
 }
 
+// baseInstructions is the guidance every client gets when it connects, so it
+// knows what the server is for before it reads the tool list.
+const baseInstructions = "Audiobookshelf MCP server: the user's self-hosted audiobook and podcast library. " +
+	"Browse and search it, see what they are listening to and their listening stats, and, " +
+	"when those toolsets are on, fix chapters, genres, tags, language and descriptions."
+
+// Options configures [NewServer].
+type Options struct {
+	// Version is the server version reported to clients.
+	Version string
+	// Toolsets names the toolsets to enable. Empty means the defaults; "all"
+	// enables everything.
+	Toolsets []string
+	// Instructions is more guidance for clients, appended to the base text that
+	// NewServer always sends when they connect.
+	Instructions string
+}
+
 // NewServer creates an MCP server with the tools of the enabled toolsets.
-// An empty toolsets list means the defaults; "all" enables everything.
-func NewServer(svcs Services, toolsets []string) *mcp.Server {
+func NewServer(svcs Services, opts Options) *mcp.Server {
+	instructions := baseInstructions
+	if opts.Instructions != "" {
+		instructions += "\n\n" + opts.Instructions
+	}
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "audiobookshelf-mcp-server",
-			Version: "0.2.0",
+			Version: opts.Version,
 		},
-		nil,
+		&mcp.ServerOptions{Instructions: instructions},
 	)
 
-	enabled := resolveToolsets(toolsets)
+	enabled := resolveToolsets(opts.Toolsets)
 	for _, st := range AllTools(svcs) {
 		if enabled[st.Toolset.ID] {
 			st.Register(server)

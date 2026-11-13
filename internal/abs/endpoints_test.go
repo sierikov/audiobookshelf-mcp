@@ -452,3 +452,15 @@ func TestLastBodyFor_ReturnsBodyOfThatPath(t *testing.T) {
 	assert.JSONEq(t, `{"libraryItemIds":["li_1"]}`, string(srv.LastBody()))
 	assert.Nil(t, srv.LastBodyFor("/api/other"))
 }
+
+func TestClient_Me(t *testing.T) {
+	c, _ := newClient(t, map[string]any{"/api/me": map[string]any{
+		"id": "u1", "username": "artem", "type": "root",
+		"permissions": map[string]any{"update": true, "delete": false},
+	}})
+
+	u, err := c.Me(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, abs.User{ID: "u1", Username: "artem", Type: "root", Permissions: abs.UserPermissions{Update: true}}, u)
+}

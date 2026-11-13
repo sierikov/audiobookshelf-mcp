@@ -28,8 +28,8 @@
 //     add or remove genres and tags or set language and description (opt-in,
 //     disabled by default; writes)
 //
-// The libraries, items, and playback toolsets are enabled by default. Pass an
-// empty list to [NewServer] for the defaults, or "all" to enable everything.
+// The libraries, items, and playback toolsets are enabled by default. Leave
+// [Options].Toolsets empty for the defaults, or pass "all" to enable everything.
 //
 // # Security
 //

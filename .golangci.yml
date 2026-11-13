@@ -71,6 +71,32 @@ linters:
           deny:
             - pkg: github.com/sierikov/audiobookshelf-mcp/internal/abs
               desc: tools talk to services, never to the API client (wiring tests excepted)
+        leaf:
+          files:
+            - "**/internal/buildinfo/**"
+            - "**/internal/config/**"
+            - "**/internal/update/**"
+            - "**/internal/agents/**"
+            - "**/internal/atomicfile/**"
+          deny:
+            - pkg: github.com/sierikov/audiobookshelf-mcp/internal/abs
+              desc: leaf packages stay independent of the API client and MCP
+            - pkg: github.com/sierikov/audiobookshelf-mcp/internal/service
+              desc: leaf packages stay independent of the API client and MCP
+            - pkg: github.com/sierikov/audiobookshelf-mcp/internal/tools
+              desc: leaf packages stay independent of the API client and MCP
+            - pkg: github.com/modelcontextprotocol/go-sdk
+              desc: leaf packages stay independent of the API client and MCP
+        setup:
+          files:
+            - "**/internal/setup/**"
+          deny:
+            - pkg: github.com/sierikov/audiobookshelf-mcp/internal/service
+              desc: setup talks to Audiobookshelf directly and never to MCP
+            - pkg: github.com/sierikov/audiobookshelf-mcp/internal/tools
+              desc: setup talks to Audiobookshelf directly and never to MCP
+            - pkg: github.com/modelcontextprotocol/go-sdk
+              desc: setup talks to Audiobookshelf directly and never to MCP
 
     revive:
       rules:

@@ -181,3 +181,10 @@ func (c *Client) UpdateItems(ctx context.Context, updates []ItemUpdate) (int, er
 	err := c.do(ctx, http.MethodPost, "/api/items/batch/update", nil, updates, &resp)
 	return resp.Updates, err
 }
+
+// Me returns the account behind the token, which also checks that the token works.
+func (c *Client) Me(ctx context.Context) (User, error) {
+	var user User
+	err := c.get(ctx, "/api/me", nil, &user)
+	return user, err
+}

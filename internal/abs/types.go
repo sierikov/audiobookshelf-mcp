@@ -320,3 +320,16 @@ type AudibleChapter struct {
 	LengthMs      int64  `json:"lengthMs"`
 	Title         string `json:"title"`
 }
+
+// User is the Audiobookshelf account behind the API token.
+type User struct {
+	ID          string          `json:"id"`
+	Username    string          `json:"username"`
+	Type        string          `json:"type"`
+	Permissions UserPermissions `json:"permissions"`
+}
+
+// UserPermissions lists the permissions Audiobookshelf grants a [User].
+type UserPermissions struct {
+	Update bool `json:"update"`
+}
