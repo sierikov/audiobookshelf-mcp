@@ -1,116 +1,189 @@
 name: Release
 
+# Pushing a tag like v1.2.0 releases it, one job per stage:
+#   tag       checks the tag and reads the version from it
+#   release   runs the tests, then GoReleaser (GitHub release, Homebrew cask), checks
+#             server.json with the MCP Registry, and uploads dist/ as an artifact
+#   npm       publishes the six npm packages
+#   registry  publishes server.json to the MCP Registry
+# "Run workflow" is always a dry run: a GoReleaser snapshot and npm publish --dry-run.
+# If a job fails, fix the cause and use "Re-run failed jobs": the jobs that passed are
+# kept, and the rest reuse the uploaded dist/, which is kept for 90 days.
+# A pre-release tag (v1.2.0-rc.1) gets a GitHub pre-release and npm's `next` tag, and
+# no Homebrew cask or MCP Registry entry.
+
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  tag:
+    name: Read the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}   # empty on a dry run: the release job reads GoReleaser's
+      prerelease: ${{ github.event_name == 'push' && contains(github.ref_name, '-') }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Read the version from the tag
+        id: tag
+        if: github.event_name == 'push'
+        run: |
+          tag=$GITHUB_REF_NAME
+          if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $tag is not vX.Y.Z or vX.Y.Z-prerelease"
+            exit 1
+          fi
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
   release:
-    name: Release
+    name: Build and release
+    needs: tag
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write  # required for OIDC auth with mcp-publisher
+      contents: write   # GoReleaser creates the GitHub release
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0   # GoReleaser needs the tags
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false   # a release never builds from a cache another run could have written
 
-      - name: Build binaries
-        run: |
-          GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-linux-amd64       ./cmd/audiobookshelf-mcp
-          GOOS=linux   GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-linux-arm64       ./cmd/audiobookshelf-mcp
-          GOOS=darwin  GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-macos-amd64       ./cmd/audiobookshelf-mcp
-          GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-macos-arm64       ./cmd/audiobookshelf-mcp
-          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o audiobookshelf-mcp-windows-amd64.exe ./cmd/audiobookshelf-mcp
+      - name: Test
+        run: go test ./...
 
-      - name: Package .mcpb bundles
-        run: |
-          for platform in linux-amd64 linux-arm64 macos-amd64 macos-arm64; do
-            cp audiobookshelf-mcp-${platform} audiobookshelf-mcp
-            zip audiobookshelf-mcp-${platform}.mcpb manifest.json icon.png audiobookshelf-mcp
-            rm audiobookshelf-mcp
-          done
-          mkdir -p _win
-          sed 's|${__dirname}/audiobookshelf-mcp"|${__dirname}/audiobookshelf-mcp.exe"|;s|"entry_point": "audiobookshelf-mcp"|"entry_point": "audiobookshelf-mcp.exe"|' manifest.json > _win/manifest.json
-          cp icon.png _win/icon.png
-          cp audiobookshelf-mcp-windows-amd64.exe _win/audiobookshelf-mcp.exe
-          (cd _win && zip ../audiobookshelf-mcp-windows-amd64.mcpb manifest.json icon.png audiobookshelf-mcp.exe)
-          rm -rf _win
-
-      - name: Generate server.json with release URLs and SHA-256 hashes
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          REPO="https://github.com/${{ github.repository }}"
-
-          python3 - <<'EOF'
-          import json, hashlib, os, sys
-
-          version = os.environ["VERSION"]
-          repo    = os.environ["REPO"]
-
-          platforms = [
-            ("macos-arm64",    "audiobookshelf-mcp-macos-arm64.mcpb"),
-            ("macos-amd64",    "audiobookshelf-mcp-macos-amd64.mcpb"),
-            ("linux-amd64",    "audiobookshelf-mcp-linux-amd64.mcpb"),
-            ("linux-arm64",    "audiobookshelf-mcp-linux-arm64.mcpb"),
-            ("windows-amd64",  "audiobookshelf-mcp-windows-amd64.mcpb"),
-          ]
-
-          with open("server.json") as f:
-              srv = json.load(f)
-
-          srv["version"] = version
-          srv["packages"] = []
-
-          for _, filename in platforms:
-              with open(filename, "rb") as f:
-                  sha256 = hashlib.sha256(f.read()).hexdigest()
-              url = f"{repo}/releases/download/v{version}/{filename}"
-              srv["packages"].append({
-                  "registryType": "mcpb",
-                  "identifier": url,
-                  "fileSha256": sha256,
-                  "transport": {"type": "stdio"},
-              })
-
-          with open("server.json", "w") as f:
-              json.dump(srv, f, indent=2)
-              f.write("\n")
-
-          print(f"Generated server.json for v{version} with {len(srv['packages'])} packages")
-          EOF
-        env:
-          VERSION: ${{ github.ref_name }}
-          REPO: https://github.com/${{ github.repository }}
-
-      - uses: softprops/action-gh-release@v2
+      - name: Release with GoReleaser
+        if: needs.tag.outputs.dry_run != 'true'
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
-          generate_release_notes: true
-          files: |
-            audiobookshelf-mcp-linux-amd64
-            audiobookshelf-mcp-linux-arm64
-            audiobookshelf-mcp-macos-amd64
-            audiobookshelf-mcp-macos-arm64
-            audiobookshelf-mcp-windows-amd64.exe
-            audiobookshelf-mcp-linux-amd64.mcpb
-            audiobookshelf-mcp-linux-arm64.mcpb
-            audiobookshelf-mcp-macos-amd64.mcpb
-            audiobookshelf-mcp-macos-arm64.mcpb
-            audiobookshelf-mcp-windows-amd64.mcpb
+          version: v2.19.0
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      - name: Build a snapshot with GoReleaser (dry run)
+        if: needs.tag.outputs.dry_run == 'true'
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: v2.19.0
+          args: release --snapshot --clean
+
+      # A dry run has no tag, so it takes the version GoReleaser gave the snapshot.
+      - name: Read the version
+        id: version
+        env:
+          VERSION: ${{ needs.tag.outputs.version }}
+        run: echo "version=${VERSION:-$(jq -r .version dist/metadata.json)}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp server.json
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: cp server.json dist/server.json && SERVER_JSON=dist/server.json sh scripts/server-json.sh "$VERSION"
 
       - name: Install mcp-publisher
-        run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+        run: sh scripts/install-mcp-publisher.sh
 
-      - name: Authenticate to MCP Registry
+      # The registry checks the file alone, so a dry run catches an entry it would refuse.
+      - name: Check server.json with the MCP Registry
+        run: ./mcp-publisher validate dist/server.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90   # how long "Re-run failed jobs" can reuse it
+          overwrite: true      # a re-run of this job replaces the dist/ of the run before
+
+  npm:
+    name: Publish to npm
+    needs: [tag, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # npm trusted publishing (OIDC)
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+
+      # npm trusted publishing needs npm >= 11.5.1 and Node >= 22.14.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Update npm
+        run: npm install -g 'npm@^11.5.1'
+
+      - name: Assemble the packages
+        run: sh scripts/npm-packages.sh "$VERSION"
+
+      - name: Publish the packages
+        env:
+          NPM_TAG: ${{ needs.tag.outputs.dry_run == 'true' && 'dry-run' || needs.tag.outputs.prerelease == 'true' && 'next' || 'latest' }}
+        run: sh scripts/npm-publish.sh "$VERSION" "$NPM_TAG" ${{ needs.tag.outputs.dry_run == 'true' && '--dry-run' || '' }}
+
+  registry:
+    name: Publish to the MCP Registry
+    needs: [tag, release, npm]
+    if: needs.tag.outputs.dry_run != 'true' && needs.tag.outputs.prerelease != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # OIDC login to the MCP Registry
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+
+      - name: Install mcp-publisher
+        run: sh scripts/install-mcp-publisher.sh
+
+      - name: Log in to the MCP Registry
         run: ./mcp-publisher login github-oidc
-        continue-on-error: true
 
-      - name: Publish to MCP Registry
-        run: ./mcp-publisher publish
-        continue-on-error: true  # registry is in preview; don't fail the release if it's down
+      # A re-run after the publish went through has nothing left to do.
+      - name: Look for this version in the registry
+        id: listed
+        run: |
+          if sh scripts/registry-has-version.sh "$(jq -r .name dist/server.json)" "$VERSION"; then
+            echo "::notice::the MCP Registry already has $VERSION: nothing to publish"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          elif [ $? -ne 1 ]; then
+            exit 1
+          fi
+
+      - name: Publish server.json
+        if: steps.listed.outputs.found != 'true'
+        run: ./mcp-publisher publish dist/server.json

@@ -1,0 +1,48 @@
+version: 2
+project_name: audiobookshelf-mcp
+builds:
+  - id: default
+    main: ./cmd/audiobookshelf-mcp
+    binary: audiobookshelf-mcp
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X github.com/sierikov/audiobookshelf-mcp/internal/buildinfo.version={{ .Version }}"]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore: [{goos: windows, goarch: arm64}]
+    hooks:
+      post: ['sh scripts/mcpb.sh {{ .Path }} {{ .Target }} {{ .Version }}']
+archives:
+  - id: archive
+    formats: [tar.gz]
+    format_overrides: [{goos: windows, formats: [zip]}]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: raw
+    formats: [binary]
+    name_template: '{{ .ProjectName }}-{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}-{{ .Arch }}'
+homebrew_casks:
+  - name: audiobookshelf-mcp
+    ids: [archive]
+    binaries: [audiobookshelf-mcp]
+    homepage: https://github.com/sierikov/audiobookshelf-mcp
+    description: MCP server for your Audiobookshelf library
+    skip_upload: auto  # no cask for a pre-release
+    repository:
+      owner: sierikov
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/audiobookshelf-mcp"]
+          end
+release:
+  prerelease: auto
+  replace_existing_artifacts: true  # a re-run of a failed release job uploads again
+  extra_files: [{glob: ./dist/mcpb/*.mcpb}]
+checksum:
+  name_template: checksums.txt
+  extra_files: [{glob: ./dist/mcpb/*.mcpb}]
+changelog:
+  use: github-native

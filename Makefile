@@ -4,7 +4,7 @@ GO        := go
 GOFLAGS   :=
 MCPB_FILE := audiobookshelf-mcp.mcpb
 
-.PHONY: all build test lint fmt vet check clean mcpb mocks
+.PHONY: all build test lint fmt vet check clean mcpb mocks snapshot
 
 all: check build
 
@@ -36,3 +36,6 @@ check: fmt vet lint test
 
 clean:
 	rm -f $(BINARY) $(MCPB_FILE)
+
+snapshot:
+	go run github.com/goreleaser/goreleaser/v2@v2.19.0 release --snapshot --clean

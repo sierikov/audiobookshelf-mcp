@@ -4,3 +4,5 @@
 .vscode
 *.log
 *.tmp
+dist/
+/mcp-publisher
