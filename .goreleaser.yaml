@@ -26,7 +26,9 @@ homebrew_casks:
     binaries: [audiobookshelf-mcp]
     homepage: https://github.com/sierikov/audiobookshelf-mcp
     description: MCP server for your Audiobookshelf library
-    skip_upload: auto  # no cask for a pre-release
+    # Homebrew is not released yet. To turn it on, set the HOMEBREW_TAP_GITHUB_TOKEN
+    # secret and change this to auto (auto skips pre-releases).
+    skip_upload: true
     repository:
       owner: sierikov
       name: homebrew-tap

@@ -2,7 +2,7 @@ name: Release
 
 # Pushing a tag like v1.2.0 releases it, one job per stage:
 #   tag       checks the tag and reads the version from it
-#   release   runs the tests, then GoReleaser (GitHub release, Homebrew cask), checks
+#   release   runs the tests, then GoReleaser (GitHub release; the cask is off), checks
 #             server.json with the MCP Registry, and uploads dist/ as an artifact
 #   npm       publishes the six npm packages
 #   registry  publishes server.json to the MCP Registry
@@ -10,7 +10,7 @@ name: Release
 # If a job fails, fix the cause and use "Re-run failed jobs": the jobs that passed are
 # kept, and the rest reuse the uploaded dist/, which is kept for 90 days.
 # A pre-release tag (v1.2.0-rc.1) gets a GitHub pre-release and npm's `next` tag, and
-# no Homebrew cask or MCP Registry entry.
+# no MCP Registry entry (and no Homebrew cask, once that is turned on).
 
 on:
   push:

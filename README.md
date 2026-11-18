@@ -29,15 +29,6 @@ One command connects the server to your Audiobookshelf and adds it to your AI ag
 npx -y @sierikov/audiobookshelf-mcp setup
 ```
 
-**Homebrew:**
-
-```bash
-brew install sierikov/tap/audiobookshelf-mcp
-audiobookshelf-mcp setup
-```
-
-Needs Homebrew 6 or newer (the cask uses install steps). Installing by the full name also satisfies Homebrew's tap-trust check. The cask removes the quarantine flag so Gatekeeper does not prompt. Linux support for the cask is not confirmed yet: on Linux, use npx or `go install`.
-
 **go install:**
 
 ```bash
@@ -86,7 +77,6 @@ Upgrade the way you installed:
 
 | Installed with | Upgrade |
 |---|---|
-| Homebrew | `brew upgrade audiobookshelf-mcp` |
 | npx | `npx -y @sierikov/audiobookshelf-mcp@latest setup` |
 | go install | `go install github.com/sierikov/audiobookshelf-mcp/cmd/audiobookshelf-mcp@latest` |
 | A downloaded binary or the Claude Desktop extension | Download the `.mcpb` or binary for your platform from [GitHub releases](https://github.com/sierikov/audiobookshelf-mcp/releases/latest) |
@@ -307,13 +297,13 @@ A release is a signed tag. The version comes from the tag, so there is nothing t
 git tag -s vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z
 ```
 
-The Release workflow then publishes, one job after another, the GitHub release (binaries and `.mcpb` bundles) with the Homebrew cask, the npm packages, and the MCP Registry entry. GitHub generates the release notes; edit them on the release afterwards if needed.
+The Release workflow then publishes, one job after another, the GitHub release (binaries and `.mcpb` bundles), the npm packages, and the MCP Registry entry. GitHub generates the release notes; edit them on the release afterwards if needed. The Homebrew cask is switched off for now: to turn it on, set the `HOMEBREW_TAP_GITHUB_TOKEN` secret (write access to `sierikov/homebrew-tap`) and change `skip_upload` in `.goreleaser.yaml` to `auto`.
 
 Actions → Release → Run workflow is always a dry run: it builds a snapshot, checks `server.json` with the MCP Registry, rehearses the npm publish, and publishes nothing.
 
 If a job fails, fix the cause and use **Re-run failed jobs** on the run: the jobs that succeeded are kept, and the rest reuse their build, which is kept for 90 days.
 
-A pre-release tag such as `v1.2.0-rc.1` becomes a GitHub pre-release and goes to npm under the `next` tag. It gets no Homebrew cask and no MCP Registry entry.
+A pre-release tag such as `v1.2.0-rc.1` becomes a GitHub pre-release and goes to npm under the `next` tag. It gets no MCP Registry entry, and no Homebrew cask once that is on.
 
 For the first release, npm trusted publishing cannot create a package, so the npm job fails until the packages exist. Publish the six packages by hand once (`@sierikov/audiobookshelf-mcp` and the five `@sierikov/audiobookshelf-mcp-<platform>` ones), set up trusted publishing for each of them on npmjs.com, then re-run the failed jobs.
 
