@@ -27,8 +27,9 @@ func TestMetadataTools_Annotations(t *testing.T) {
 		require.NotNil(t, tool, name)
 		a := tool.Tool.Annotations
 		assert.True(t, a.ReadOnlyHint, name)
-		assert.Nil(t, a.DestructiveHint, name)
-		assert.False(t, a.IdempotentHint, name)
+		require.NotNil(t, a.DestructiveHint, name)
+		assert.False(t, *a.DestructiveHint, name)
+		assert.True(t, a.IdempotentHint, name)
 		require.NotNil(t, a.OpenWorldHint, name)
 		assert.False(t, *a.OpenWorldHint, name)
 	}
@@ -252,14 +253,6 @@ func TestFindItems_BadArguments(t *testing.T) {
 	tools := MetadataTools(NewMockMetadataService(t))
 
 	assertToolError(t, "missing required parameter: libraryId", call(t, tools, "find_items", map[string]any{}))
-	assertToolError(t, "parameter limit: expected number, got string",
-		call(t, tools, "find_items", map[string]any{"libraryId": "lib-1", "limit": "ten"}))
-	assertToolError(t, "parameter genre has wrong type: expected string, got float64",
-		call(t, tools, "find_items", map[string]any{"libraryId": "lib-1", "genre": 1.0}))
-	assertToolError(t, `detail must be "summary" or "full", got "everything"`,
-		call(t, tools, "find_items", map[string]any{"libraryId": "lib-1", "detail": "everything"}))
-	assertToolError(t, "parameter detail has wrong type: expected string, got float64",
-		call(t, tools, "find_items", map[string]any{"libraryId": "lib-1", "detail": 1.0}))
 }
 
 func TestSearchBookMetadata(t *testing.T) {

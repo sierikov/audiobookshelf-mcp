@@ -43,7 +43,7 @@ func getItem(svc ItemService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "get_item",
 			Description: "Get detailed information about an audiobook or podcast by its item ID",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -122,22 +122,16 @@ func getItemsInProgress(svc ItemService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "get_items_in_progress",
 			Description: "Get audiobooks and podcasts currently being listened to",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"limit": {
-						Type:        "number",
-						Description: "Max items to return (default 25)",
-					},
+					"limit": limitSchema("Max items to return (default 25)"),
 				},
 			},
 		},
 		Handler: func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, error) {
-			limit, err := OptionalIntParam(args, "limit", 25)
-			if err != nil {
-				return errResult(err.Error())
-			}
+			limit := OptionalIntParam(args, "limit", 25)
 
 			inProgress, err := svc.InProgress(ctx, limit)
 			if err != nil {

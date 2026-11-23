@@ -18,35 +18,26 @@ func TestRequiredParam(t *testing.T) {
 	require.ErrorContains(t, err, "missing required parameter")
 
 	_, err = RequiredParam[int](args, "name")
-	require.ErrorContains(t, err, "wrong type")
+	require.ErrorContains(t, err, "missing required parameter: name", "a value of another type reads as absent")
 }
 
 func TestOptionalParam(t *testing.T) {
 	args := map[string]any{"name": "hello"}
 
-	v, ok, err := OptionalParam[string](args, "name")
-	require.NoError(t, err)
+	v, ok := OptionalParam[string](args, "name")
 	assert.True(t, ok)
 	assert.Equal(t, "hello", v)
 
-	_, ok, err = OptionalParam[string](args, "missing")
-	require.NoError(t, err)
+	_, ok = OptionalParam[string](args, "missing")
 	assert.False(t, ok)
 }
 
 func TestOptionalIntParam(t *testing.T) {
 	args := map[string]any{"limit": float64(42)}
 
-	v, err := OptionalIntParam(args, "limit", 10)
-	require.NoError(t, err)
-	assert.Equal(t, 42, v)
-
-	v, err = OptionalIntParam(args, "missing", 10)
-	require.NoError(t, err)
-	assert.Equal(t, 10, v)
-
-	_, err = OptionalIntParam(map[string]any{"limit": "bad"}, "limit", 10)
-	assert.Error(t, err)
+	assert.Equal(t, 42, OptionalIntParam(args, "limit", 10))
+	assert.Equal(t, 10, OptionalIntParam(args, "missing", 10))
+	assert.Equal(t, 10, OptionalIntParam(map[string]any{"limit": "bad"}, "limit", 10), "a value of another type reads as absent")
 }
 
 func TestDefaultToolsets(t *testing.T) {

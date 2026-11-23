@@ -289,6 +289,8 @@ The default toolsets are **read-only**. Two opt-in toolsets write, and both need
 
 `all` includes every write tool; list toolsets explicitly to stay read-only. No tool deletes items, controls playback, or manages users. The API token comes from the settings file (readable only by you) or an environment variable, and is never logged or exposed.
 
+Every call is checked against the tool's input schema before it runs. An unknown argument, a wrong type, or a value out of range is refused with an error that names it, so a misspelled filter or an extra field is never silently ignored.
+
 ## Releasing
 
 A release is a signed tag. The version comes from the tag, so there is nothing to bump in files: `manifest.json` and `server.json` keep the placeholder version `0.0.0-dev`, and the release stamps the real one.

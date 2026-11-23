@@ -115,11 +115,11 @@ func TestRemoveTags(t *testing.T) {
 }
 
 func TestListTools_BadArguments(t *testing.T) {
-	for _, tool := range []struct{ name, param, noun string }{
-		{"add_genres", "genres", "genre"},
-		{"remove_genres", "genres", "genre"},
-		{"add_tags", "tags", "tag"},
-		{"remove_tags", "tags", "tag"},
+	for _, tool := range []struct{ name, param string }{
+		{"add_genres", "genres"},
+		{"remove_genres", "genres"},
+		{"add_tags", "tags"},
+		{"remove_tags", "tags"},
 	} {
 		tools := MetadataTools(NewMockMetadataService(t))
 		cases := []struct {
@@ -128,12 +128,7 @@ func TestListTools_BadArguments(t *testing.T) {
 			want string
 		}{
 			{"missing itemIds", map[string]any{tool.param: []any{"a"}}, "missing required parameter: itemIds"},
-			{"itemIds not a list", map[string]any{"itemIds": "li_1", tool.param: []any{"a"}},
-				"parameter itemIds has wrong type: expected []interface {}, got string"},
-			{"itemId not a string", map[string]any{"itemIds": []any{"li_1", 3}, tool.param: []any{"a"}}, "itemId 2 must be a string"},
 			{"missing values", map[string]any{"itemIds": []any{"li_1"}}, "missing required parameter: " + tool.param},
-			{"value null", map[string]any{"itemIds": []any{"li_1"}, tool.param: []any{nil}}, tool.noun + " 1 must be a string"},
-			{"value number", map[string]any{"itemIds": []any{"li_1"}, tool.param: []any{"a", 1}}, tool.noun + " 2 must be a string"},
 		}
 		for _, tc := range cases {
 			t.Run(tool.name+"/"+tc.name, func(t *testing.T) {
@@ -205,26 +200,9 @@ func TestUpdateItems(t *testing.T) {
 }
 
 func TestUpdateItems_BadArguments(t *testing.T) {
-	cases := []struct {
-		name string
-		args map[string]any
-		want string
-	}{
-		{"missing items", map[string]any{}, "missing required parameter: items"},
-		{"items not a list", map[string]any{"items": "x"}, "parameter items has wrong type: expected []interface {}, got string"},
-		{"item not an object", map[string]any{"items": []any{map[string]any{"itemId": "li_1"}, "li_2"}}, "item 2 must be an object with itemId"},
-		{"item without itemId", map[string]any{"items": []any{map[string]any{"language": "x"}}}, "item 1 must be an object with itemId"},
-		{"itemId not a string", map[string]any{"items": []any{map[string]any{"itemId": 5}}}, "item 1: itemId must be a string"},
-		{"language null", map[string]any{"items": []any{map[string]any{"itemId": "li_1", "language": nil}}}, "item 1: language must be a string"},
-		{"description number", map[string]any{"items": []any{map[string]any{"itemId": "li_1"}, map[string]any{"itemId": "li_2", "description": 3}}},
-			"item 2: description must be a string"},
-	}
 	tools := MetadataTools(NewMockMetadataService(t))
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assertToolError(t, tc.want, call(t, tools, "update_items", tc.args))
-		})
-	}
+
+	assertToolError(t, "missing required parameter: items", call(t, tools, "update_items", map[string]any{}))
 }
 
 func TestUpdateItems_Errors(t *testing.T) {

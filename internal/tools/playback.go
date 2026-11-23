@@ -31,7 +31,7 @@ func getListeningStats(svc PlaybackService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "get_listening_stats",
 			Description: "Get your overall listening statistics including total time and daily breakdown",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: map[string]*jsonschema.Schema{},
@@ -83,22 +83,16 @@ func getListeningSessions(svc PlaybackService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "get_listening_sessions",
 			Description: "Get your recent listening sessions with titles, dates, and durations",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"limit": {
-						Type:        "number",
-						Description: "Max sessions to return (default 25)",
-					},
+					"limit": limitSchema("Max sessions to return (default 25)"),
 				},
 			},
 		},
 		Handler: func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, error) {
-			limit, err := OptionalIntParam(args, "limit", 25)
-			if err != nil {
-				return errResult(err.Error())
-			}
+			limit := OptionalIntParam(args, "limit", 25)
 
 			page, err := svc.Sessions(ctx, limit)
 			if err != nil {
@@ -133,7 +127,7 @@ func getMediaProgress(svc PlaybackService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "get_media_progress",
 			Description: "Get your reading/listening progress for a specific audiobook or podcast episode",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -154,7 +148,7 @@ func getMediaProgress(svc PlaybackService) ServerTool {
 			if err != nil {
 				return errResult(err.Error())
 			}
-			episodeID, _, _ := OptionalParam[string](args, "episodeId")
+			episodeID, _ := OptionalParam[string](args, "episodeId")
 
 			p, err := svc.Progress(ctx, itemID, episodeID)
 			if err != nil {

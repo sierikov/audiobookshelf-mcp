@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -38,29 +37,6 @@ const (
 // caller gives no limit.
 const defaultFindLimit = 50
 
-// readAnnotations marks a tool that only reads from the Audiobookshelf server.
-func readAnnotations() *mcp.ToolAnnotations {
-	return &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)}
-}
-
-// openWorldReadAnnotations marks a tool that only reads, but asks a service
-// outside the Audiobookshelf server.
-func openWorldReadAnnotations() *mcp.ToolAnnotations {
-	return &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(true)}
-}
-
-// additiveWriteAnnotations marks a tool that only adds to what is stored, and
-// is idempotent because adding a value twice leaves the same list.
-func additiveWriteAnnotations() *mcp.ToolAnnotations {
-	return &mcp.ToolAnnotations{DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)}
-}
-
-// destructiveWriteAnnotations marks a tool that removes or replaces stored
-// values, and is idempotent because repeating a call leaves the same result.
-func destructiveWriteAnnotations() *mcp.ToolAnnotations {
-	return &mcp.ToolAnnotations{DestructiveHint: new(true), IdempotentHint: true, OpenWorldHint: new(false)}
-}
-
 func libraryIDSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "string", Description: "Library ID (from list_libraries)"}
 }
@@ -71,6 +47,8 @@ func itemIDsSchema() *jsonschema.Schema {
 		Type:        "array",
 		Description: "Library item IDs of the books (from find_items), at most 100",
 		Items:       &jsonschema.Schema{Type: "string"},
+		MinItems:    new(1),
+		MaxItems:    new(service.MaxItemsPerCall),
 	}
 }
 
@@ -80,6 +58,7 @@ func valuesSchema(noun string) *jsonschema.Schema {
 		Type:        "array",
 		Description: "The " + noun + ", matched exactly (case and spelling count)",
 		Items:       &jsonschema.Schema{Type: "string"},
+		MinItems:    new(1),
 	}
 }
 
@@ -103,16 +82,13 @@ func preview(s string, n int) (head string, runes int) {
 
 // optionalStrings reads the named optional string parameters, in order.
 // A missing parameter is "".
-func optionalStrings(args map[string]any, names ...string) ([]string, error) {
+func optionalStrings(args map[string]any, names ...string) []string {
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		v, _, err := OptionalParam[string](args, name)
-		if err != nil {
-			return nil, err
-		}
+		v, _ := OptionalParam[string](args, name)
 		out = append(out, v)
 	}
-	return out, nil
+	return out
 }
 
 type valueCountOutput struct {
@@ -234,29 +210,12 @@ func parseFindArgs(args map[string]any) (findArgs, error) {
 	if err != nil {
 		return findArgs{}, err
 	}
-	strs, err := optionalStrings(args, "genre", "tag", "language", "missing")
-	if err != nil {
-		return findArgs{}, err
-	}
-	limit, err := OptionalIntParam(args, "limit", defaultFindLimit)
-	if err != nil {
-		return findArgs{}, err
-	}
-	page, err := OptionalIntParam(args, "page", 0)
-	if err != nil {
-		return findArgs{}, err
-	}
-	detail, _, err := OptionalParam[string](args, "detail")
-	if err != nil {
-		return findArgs{}, err
-	}
-	if detail != "" && detail != detailSummary && detail != detailFull {
-		return findArgs{}, fmt.Errorf("detail must be %q or %q, got %q", detailSummary, detailFull, detail)
-	}
+	strs := optionalStrings(args, "genre", "tag", "language", "missing")
+	detail, _ := OptionalParam[string](args, "detail")
 	return findArgs{
 		libraryID: libraryID,
 		filter:    service.ItemFilter{Genre: strs[0], Tag: strs[1], Language: strs[2], Missing: service.MissingField(strs[3])},
-		page:      service.Page{Limit: limit, Page: page},
+		page:      pageParams(args, defaultFindLimit),
 		full:      detail == detailFull,
 	}, nil
 }
@@ -280,8 +239,8 @@ func findItems(svc MetadataService) ServerTool {
 					"tag":       {Type: "string", Description: "Only books with this tag"},
 					"language":  {Type: "string", Description: "Only books in this language"},
 					"missing":   {Type: "string", Enum: missing, Description: "Only books that lack this field"},
-					"limit":     {Type: "number", Description: "Max books per page (default 50, at most 100)"},
-					"page":      {Type: "number", Description: "Page number, starting at 0 (default 0)"},
+					"limit":     limitSchema("Max books per page (default 50, at most 100)"),
+					"page":      pageSchema(),
 					"detail": {
 						Type:        "string",
 						Enum:        []any{detailSummary, detailFull},
@@ -390,10 +349,7 @@ func searchBookMetadata(svc MetadataService) ServerTool {
 			if err != nil {
 				return errResult(err.Error())
 			}
-			strs, err := optionalStrings(args, "region", "title", "author")
-			if err != nil {
-				return errResult(err.Error())
-			}
+			strs := optionalStrings(args, "region", "title", "author")
 
 			res, err := svc.SearchBooks(ctx, itemID, provider, strs[0], strs[1], strs[2])
 			if err != nil {

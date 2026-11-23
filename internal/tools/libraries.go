@@ -31,7 +31,7 @@ func listLibraries(svc LibraryService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "list_libraries",
 			Description: "List all audiobook and podcast libraries",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: map[string]*jsonschema.Schema{},
@@ -66,7 +66,7 @@ func searchLibrary(svc LibraryService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "search_library",
 			Description: "Search a library for audiobooks or podcasts by title, author, or narrator",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -78,10 +78,7 @@ func searchLibrary(svc LibraryService) ServerTool {
 						Type:        "string",
 						Description: "Search term (title, author, narrator)",
 					},
-					"limit": {
-						Type:        "number",
-						Description: "Max results (default 10)",
-					},
+					"limit": limitSchema("Max results (default 10)"),
 				},
 				Required: []string{"libraryId", "query"},
 			},
@@ -95,10 +92,7 @@ func searchLibrary(svc LibraryService) ServerTool {
 			if err != nil {
 				return errResult(err.Error())
 			}
-			limit, err := OptionalIntParam(args, "limit", 10)
-			if err != nil {
-				return errResult(err.Error())
-			}
+			limit := OptionalIntParam(args, "limit", 10)
 
 			hits, err := svc.Search(ctx, libraryID, query, limit)
 			if err != nil {
@@ -147,7 +141,7 @@ func listLibraryItems(svc LibraryService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "list_library_items",
 			Description: "List items in a library with pagination",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -155,14 +149,8 @@ func listLibraryItems(svc LibraryService) ServerTool {
 						Type:        "string",
 						Description: "Library ID (from list_libraries)",
 					},
-					"limit": {
-						Type:        "number",
-						Description: "Max items per page (default 20)",
-					},
-					"page": {
-						Type:        "number",
-						Description: "Page number starting from 0 (default 0)",
-					},
+					"limit": limitSchema("Max items per page (default 20)"),
+					"page":  pageSchema(),
 					"sort": {
 						Type:        "string",
 						Description: "Sort field (e.g. media.metadata.title)",
@@ -176,11 +164,8 @@ func listLibraryItems(svc LibraryService) ServerTool {
 			if err != nil {
 				return errResult(err.Error())
 			}
-			page, err := pageParams(args)
-			if err != nil {
-				return errResult(err.Error())
-			}
-			sort, _, _ := OptionalParam[string](args, "sort")
+			page := pageParams(args, 20)
+			sort, _ := OptionalParam[string](args, "sort")
 
 			res, err := svc.Items(ctx, libraryID, page, sort)
 			if err != nil {
@@ -201,16 +186,8 @@ func listLibraryItems(svc LibraryService) ServerTool {
 	}
 }
 
-// pageParams reads the optional "limit" (default 20) and "page" (default 0)
-// arguments shared by the paginated list tools.
-func pageParams(args map[string]any) (service.Page, error) {
-	limit, err := OptionalIntParam(args, "limit", 20)
-	if err != nil {
-		return service.Page{}, err
-	}
-	page, err := OptionalIntParam(args, "page", 0)
-	if err != nil {
-		return service.Page{}, err
-	}
-	return service.Page{Limit: limit, Page: page}, nil
+// pageParams reads the optional "limit" (default defaultLimit) and "page"
+// (default 0) arguments shared by the paginated list tools.
+func pageParams(args map[string]any, defaultLimit int) service.Page {
+	return service.Page{Limit: OptionalIntParam(args, "limit", defaultLimit), Page: OptionalIntParam(args, "page", 0)}
 }

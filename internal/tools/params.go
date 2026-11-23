@@ -1,60 +1,61 @@
 package tools
 
-import "fmt"
+import (
+	"fmt"
 
-// RequiredParam extracts a required parameter from args.
-func RequiredParam[T any](args map[string]any, name string) (value T, err error) {
-	var zero T
-	candidate, ok := args[name]
+	"github.com/google/jsonschema-go/jsonschema"
+
+	"github.com/sierikov/audiobookshelf-mcp/internal/service"
+)
+
+// limitSchema describes an optional page size: a whole number from 1 to
+// [service.MaxPageLimit].
+func limitSchema(description string) *jsonschema.Schema {
+	return &jsonschema.Schema{Type: "integer", Description: description, Minimum: new(1.0), Maximum: new(float64(service.MaxPageLimit))}
+}
+
+// pageSchema describes an optional page number, starting at 0.
+func pageSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{Type: "integer", Description: "Page number, starting at 0 (default 0)", Minimum: new(0.0)}
+}
+
+// The readers below don't check types: Register has already checked every
+// call's arguments against the tool's input schema. A value of another type
+// can only come from a direct call, as in a unit test, and reads as absent.
+
+// RequiredParam returns the named argument.
+func RequiredParam[T any](args map[string]any, name string) (T, error) {
+	value, ok := args[name].(T)
 	if !ok {
-		return zero, fmt.Errorf("missing required parameter: %s", name)
-	}
-	value, ok = candidate.(T)
-	if !ok {
-		return zero, fmt.Errorf("parameter %s has wrong type: expected %T, got %T", name, zero, candidate)
+		return value, fmt.Errorf("missing required parameter: %s", name)
 	}
 	return value, nil
 }
 
-// OptionalParam extracts an optional parameter from args.
-func OptionalParam[T any](args map[string]any, name string) (value T, ok bool, err error) {
-	var zero T
-	candidate, ok := args[name]
-	if !ok {
-		return zero, false, nil
-	}
-	value, ok = candidate.(T)
-	if !ok {
-		return zero, false, fmt.Errorf("parameter %s has wrong type: expected %T, got %T", name, zero, candidate)
-	}
-	return value, true, nil
+// OptionalParam returns the named argument, and whether it was given.
+func OptionalParam[T any](args map[string]any, name string) (T, bool) {
+	value, ok := args[name].(T)
+	return value, ok
 }
 
-// OptionalIntParam extracts an optional integer parameter, handling JSON number →  int conversion.
-func OptionalIntParam(args map[string]any, name string, defaultVal int) (int, error) {
-	v, ok := args[name]
-	if !ok {
-		return defaultVal, nil
+// OptionalIntParam returns the named number as an int, or defaultVal when it
+// is absent. JSON numbers arrive as float64.
+func OptionalIntParam(args map[string]any, name string, defaultVal int) int {
+	if n, ok := args[name].(float64); ok {
+		return int(n)
 	}
-	switch n := v.(type) {
-	case float64:
-		return int(n), nil
-	case int:
-		return n, nil
-	default:
-		return 0, fmt.Errorf("parameter %s: expected number, got %T", name, v)
-	}
+	return defaultVal
 }
 
-// parseStrings reads a list of strings. Items are numbered from 1 in errors,
-// as "<noun> 2 must be a string".
-func parseStrings(raw []any, noun string) ([]string, error) {
+// requiredStrings returns the named list of strings.
+func requiredStrings(args map[string]any, name string) ([]string, error) {
+	raw, err := RequiredParam[[]any](args, name)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]string, 0, len(raw))
-	for i, item := range raw {
-		s, ok := item.(string)
-		if !ok {
-			return nil, fmt.Errorf("%s %d must be a string", noun, i+1)
-		}
+	for _, item := range raw {
+		s, _ := item.(string)
 		out = append(out, s)
 	}
 	return out, nil

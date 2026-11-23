@@ -29,7 +29,7 @@ func listSeries(svc BrowseService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "list_series",
 			Description: "List all series in a library",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -37,14 +37,8 @@ func listSeries(svc BrowseService) ServerTool {
 						Type:        "string",
 						Description: "Library ID (from list_libraries)",
 					},
-					"limit": {
-						Type:        "number",
-						Description: "Max results per page (default 20)",
-					},
-					"page": {
-						Type:        "number",
-						Description: "Page number starting from 0 (default 0)",
-					},
+					"limit": limitSchema("Max results per page (default 20)"),
+					"page":  pageSchema(),
 				},
 				Required: []string{"libraryId"},
 			},
@@ -54,10 +48,7 @@ func listSeries(svc BrowseService) ServerTool {
 			if err != nil {
 				return errResult(err.Error())
 			}
-			page, err := pageParams(args)
-			if err != nil {
-				return errResult(err.Error())
-			}
+			page := pageParams(args, 20)
 
 			res, err := svc.ListSeries(ctx, libraryID, page)
 			if err != nil {
@@ -90,7 +81,7 @@ func getSeries(svc BrowseService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "get_series",
 			Description: "Get details of a series including its books",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -136,7 +127,7 @@ func getAuthor(svc BrowseService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "get_author",
 			Description: "Get details about an author including their books",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -181,7 +172,7 @@ func listCollections(svc BrowseService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "list_collections",
 			Description: "List collections in a library",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -189,14 +180,8 @@ func listCollections(svc BrowseService) ServerTool {
 						Type:        "string",
 						Description: "Library ID (from list_libraries)",
 					},
-					"limit": {
-						Type:        "number",
-						Description: "Max results per page (default 20)",
-					},
-					"page": {
-						Type:        "number",
-						Description: "Page number starting from 0 (default 0)",
-					},
+					"limit": limitSchema("Max results per page (default 20)"),
+					"page":  pageSchema(),
 				},
 				Required: []string{"libraryId"},
 			},
@@ -206,10 +191,7 @@ func listCollections(svc BrowseService) ServerTool {
 			if err != nil {
 				return errResult(err.Error())
 			}
-			page, err := pageParams(args)
-			if err != nil {
-				return errResult(err.Error())
-			}
+			page := pageParams(args, 20)
 
 			res, err := svc.Collections(ctx, libraryID, page)
 			if err != nil {

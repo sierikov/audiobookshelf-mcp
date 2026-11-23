@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -83,10 +82,8 @@ func toListPrevious(items []service.ListChange) []previousOutput[[]string] {
 type listWrite struct {
 	name        string
 	description string
-	// plural names the values parameter, as in "genres"; noun is how one value
-	// is named in errors, as in "genre".
+	// plural names the values parameter, as in "genres".
 	plural      string
-	noun        string
 	errorPrefix string
 	// removes is set for the remove tools, whose books list the values they
 	// lost under removed; the add tools list the values gained under added.
@@ -114,11 +111,11 @@ func (w listWrite) tool(svc MetadataService) ServerTool {
 			},
 		},
 		Handler: func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, error) {
-			itemIDs, err := requiredStrings(args, "itemIds", "itemId")
+			itemIDs, err := requiredStrings(args, "itemIds")
 			if err != nil {
 				return errResult(err.Error())
 			}
-			values, err := requiredStrings(args, w.plural, w.noun)
+			values, err := requiredStrings(args, w.plural)
 			if err != nil {
 				return errResult(err.Error())
 			}
@@ -133,22 +130,11 @@ func (w listWrite) tool(svc MetadataService) ServerTool {
 	}
 }
 
-// requiredStrings reads a required list-of-strings parameter; noun is how
-// its items are named in errors.
-func requiredStrings(args map[string]any, name, noun string) ([]string, error) {
-	raw, err := RequiredParam[[]any](args, name)
-	if err != nil {
-		return nil, err
-	}
-	return parseStrings(raw, noun)
-}
-
 func addGenres(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "add_genres",
 		description: `Add genres to one or more books (up to 100). Genres a book already has are skipped; a genre it has in another case is an error. Show the user the books and the genres and get their confirmation before calling. To rename a genre, call add_genres with the new name first, then remove_genres with the old one, so no book is left without it; only for a change of case (fiction → Fiction), remove first, because adding a case variant is an error. Each changed book lists the genres it gained in added; to undo, call remove_genres with exactly those genres on that book (books with the same added genres can share one call).`,
 		plural:      "genres",
-		noun:        "genre",
 		errorPrefix: "failed to add genres: ",
 		annotations: additiveWriteAnnotations(),
 		change:      MetadataService.AddGenres,
@@ -160,7 +146,6 @@ func removeGenres(svc MetadataService) ServerTool {
 		name:        "remove_genres",
 		description: `Remove genres from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the genre are left unchanged. Show the user the books and the genres and get their confirmation before calling. For a rename, add the new name with add_genres first. Each changed book lists the genres it lost in removed; to undo, call add_genres with exactly those genres on that book (books with the same removed genres can share one call).`,
 		plural:      "genres",
-		noun:        "genre",
 		errorPrefix: "failed to remove genres: ",
 		removes:     true,
 		annotations: destructiveWriteAnnotations(),
@@ -173,7 +158,6 @@ func addTags(svc MetadataService) ServerTool {
 		name:        "add_tags",
 		description: `Add tags to one or more books (up to 100). Tags a book already has are skipped; a tag it has in another case is an error. Show the user the books and the tags and get their confirmation before calling. To rename a tag, call add_tags with the new name first, then remove_tags with the old one, so no book is left without it; only for a change of case (fiction → Fiction), remove first, because adding a case variant is an error. Each changed book lists the tags it gained in added; to undo, call remove_tags with exactly those tags on that book (books with the same added tags can share one call).`,
 		plural:      "tags",
-		noun:        "tag",
 		errorPrefix: "failed to add tags: ",
 		annotations: additiveWriteAnnotations(),
 		change:      MetadataService.AddTags,
@@ -185,7 +169,6 @@ func removeTags(svc MetadataService) ServerTool {
 		name:        "remove_tags",
 		description: `Remove tags from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the tag are left unchanged. Show the user the books and the tags and get their confirmation before calling. For a rename, add the new name with add_tags first. Each changed book lists the tags it lost in removed; to undo, call add_tags with exactly those tags on that book (books with the same removed tags can share one call).`,
 		plural:      "tags",
-		noun:        "tag",
 		errorPrefix: "failed to remove tags: ",
 		removes:     true,
 		annotations: destructiveWriteAnnotations(),
@@ -233,57 +216,26 @@ func toUpdatePrevious(items []service.ItemUpdateResult) []previousOutput[itemFie
 	return out
 }
 
-// parseItemChanges reads the items of update_items. Items are numbered from 1
-// in errors. A field that is present must be a string, so an explicit null is
-// an error and not a request to clear the field.
-func parseItemChanges(raw []any) ([]service.ItemChange, error) {
+// parseItemChanges reads the items of update_items. The schema has checked
+// their shape; a field left out stays nil, so it is not touched.
+func parseItemChanges(raw []any) []service.ItemChange {
 	out := make([]service.ItemChange, 0, len(raw))
-	for i, entry := range raw {
-		n := i + 1
-		obj, ok := entry.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("item %d must be an object with itemId", n)
-		}
-		rawID, ok := obj["itemId"]
-		if !ok {
-			return nil, fmt.Errorf("item %d must be an object with itemId", n)
-		}
-		id, ok := rawID.(string)
-		if !ok {
-			return nil, fmt.Errorf("item %d: itemId must be a string", n)
-		}
-		language, hasLanguage, err := optionalString(obj, "language", n)
-		if err != nil {
-			return nil, err
-		}
-		description, hasDescription, err := optionalString(obj, "description", n)
-		if err != nil {
-			return nil, err
-		}
-		change := service.ItemChange{ItemID: id}
-		if hasLanguage {
-			change.Language = &language
-		}
-		if hasDescription {
-			change.Description = &description
-		}
-		out = append(out, change)
+	for _, entry := range raw {
+		obj, _ := entry.(map[string]any)
+		id, _ := obj["itemId"].(string)
+		out = append(out, service.ItemChange{ItemID: id, Language: optionalString(obj, "language"), Description: optionalString(obj, "description")})
 	}
-	return out, nil
+	return out
 }
 
-// optionalString reads a field of item n that may be left out, and must be a
-// string if present. present tells a field sent as "" from one left out.
-func optionalString(obj map[string]any, name string, n int) (value string, present bool, err error) {
-	raw, ok := obj[name]
+// optionalString returns the named field, or nil when it is left out. A field
+// sent as "" is a pointer to "", which clears it.
+func optionalString(obj map[string]any, name string) *string {
+	s, ok := obj[name].(string)
 	if !ok {
-		return "", false, nil
+		return nil
 	}
-	value, ok = raw.(string)
-	if !ok {
-		return "", false, fmt.Errorf("item %d: %s must be a string", n, name)
-	}
-	return value, true, nil
+	return &s
 }
 
 func updateItems(svc MetadataService) ServerTool {
@@ -299,6 +251,8 @@ func updateItems(svc MetadataService) ServerTool {
 					"items": {
 						Type:        "array",
 						Description: "The books to change, at most 100",
+						MinItems:    new(1),
+						MaxItems:    new(service.MaxItemsPerCall),
 						Items: &jsonschema.Schema{
 							Type: "object",
 							Properties: map[string]*jsonschema.Schema{
@@ -318,10 +272,7 @@ func updateItems(svc MetadataService) ServerTool {
 			if err != nil {
 				return errResult(err.Error())
 			}
-			changes, err := parseItemChanges(raw)
-			if err != nil {
-				return errResult(err.Error())
-			}
+			changes := parseItemChanges(raw)
 
 			res, err := svc.Update(ctx, changes)
 			if err != nil {

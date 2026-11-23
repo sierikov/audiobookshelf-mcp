@@ -47,7 +47,12 @@ func NewServer(svcs Services, opts Options) *mcp.Server {
 			Name:    "audiobookshelf-mcp-server",
 			Version: opts.Version,
 		},
-		&mcp.ServerOptions{Instructions: instructions},
+		&mcp.ServerOptions{
+			Instructions: instructions,
+			// Only tools, and the list never changes; the SDK would otherwise also
+			// advertise logging and tools.listChanged.
+			Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}},
+		},
 	)
 
 	enabled := resolveToolsets(opts.Toolsets)

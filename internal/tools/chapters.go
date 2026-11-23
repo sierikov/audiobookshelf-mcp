@@ -27,12 +27,6 @@ func ChapterTools(svc ChapterService) []ServerTool {
 // beyond is a mistake, and would not fit a time.Duration.
 const maxChapterStart = 1_000_000_000
 
-// writeAnnotations marks a tool that replaces existing chapters: destructive,
-// and idempotent because repeating a call leaves the same chapters.
-func writeAnnotations() *mcp.ToolAnnotations {
-	return &mcp.ToolAnnotations{DestructiveHint: new(true), IdempotentHint: true}
-}
-
 func itemIDSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "string", Description: "Library item ID of the audiobook"}
 }
@@ -91,7 +85,7 @@ func getChapters(svc ChapterService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "get_chapters",
 			Description: "Get an audiobook's chapters, total duration and audio files. Times are in seconds. Files are listed for context only; they are rarely chapters.",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: map[string]*jsonschema.Schema{"itemId": itemIDSchema()},
@@ -185,7 +179,7 @@ func searchAudible(svc ChapterService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "search_audible",
 			Description: "Search Audible for editions of an audiobook, closest runtime first. Pick the unabridged edition in the right language whose runtime matches the book. If none does, retry with another spelling of the author (Audible often uses initials) or another region.",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: openWorldReadAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -202,9 +196,9 @@ func searchAudible(svc ChapterService) ServerTool {
 			if err != nil {
 				return errResult(err.Error())
 			}
-			region, _, _ := OptionalParam[string](args, "region")
-			title, _, _ := OptionalParam[string](args, "title")
-			author, _, _ := OptionalParam[string](args, "author")
+			region, _ := OptionalParam[string](args, "region")
+			title, _ := OptionalParam[string](args, "title")
+			author, _ := OptionalParam[string](args, "author")
 
 			res, err := svc.SearchAudible(ctx, itemID, region, title, author)
 			if err != nil {
@@ -243,7 +237,7 @@ func getAudibleChapters(svc ChapterService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "get_audible_chapters",
 			Description: "Get Audible's chapter list for an edition by ASIN and region. Times are in seconds. Compare with the book before saving: if runtimeSeconds differs from the book's duration, or the chapters sit a constant few seconds off the book's own (often brandIntroSeconds), shift every start by that offset before set_chapters.",
-			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			Annotations: openWorldReadAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -258,7 +252,7 @@ func getAudibleChapters(svc ChapterService) ServerTool {
 			if err != nil {
 				return errResult(err.Error())
 			}
-			region, _, _ := OptionalParam[string](args, "region")
+			region, _ := OptionalParam[string](args, "region")
 
 			ac, err := svc.AudibleChapters(ctx, asin, region)
 			if err != nil {
@@ -299,7 +293,7 @@ func setChapters(svc ChapterService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "set_chapters",
 			Description: "Replace ALL chapters of an audiobook. Show the user the complete list and get their confirmation before calling. Returns the previous chapters; to undo, call again with them.",
-			Annotations: writeAnnotations(),
+			Annotations: destructiveWriteAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -349,7 +343,7 @@ func renameChapters(svc ChapterService) ServerTool {
 		Tool: mcp.Tool{
 			Name:        "rename_chapters",
 			Description: "Rename an audiobook's chapters, keeping every timestamp. Pass one title per existing chapter, in order. Show the user the new titles and get their confirmation before calling.",
-			Annotations: writeAnnotations(),
+			Annotations: destructiveWriteAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -368,11 +362,7 @@ func renameChapters(svc ChapterService) ServerTool {
 			if err != nil {
 				return errResult(err.Error())
 			}
-			raw, err := RequiredParam[[]any](args, "titles")
-			if err != nil {
-				return errResult(err.Error())
-			}
-			titles, err := parseTitles(raw)
+			titles, err := requiredStrings(args, "titles")
 			if err != nil {
 				return errResult(err.Error())
 			}
@@ -387,32 +377,18 @@ func renameChapters(svc ChapterService) ServerTool {
 }
 
 // parseChapterInputs reads the set_chapters list: objects with a start in
-// seconds and a title. Chapters are numbered from 1 in errors.
+// seconds and a title. The schema has checked their shape; the range of start
+// is checked here. Chapters are numbered from 1 in errors.
 func parseChapterInputs(raw []any) ([]service.ChapterInput, error) {
 	out := make([]service.ChapterInput, 0, len(raw))
 	for i, item := range raw {
-		n := i + 1
-		obj, ok := item.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("chapter %d must be an object with start and title", n)
-		}
-		start, ok := obj["start"].(float64)
-		if !ok {
-			return nil, fmt.Errorf("chapter %d: start must be a number of seconds", n)
-		}
+		obj, _ := item.(map[string]any)
+		start, _ := obj["start"].(float64)
 		if !(start >= 0 && start <= maxChapterStart) {
-			return nil, fmt.Errorf("chapter %d: start must be between 0 and %d seconds", n, maxChapterStart)
+			return nil, fmt.Errorf("chapter %d: start must be between 0 and %d seconds", i+1, maxChapterStart)
 		}
-		title, ok := obj["title"].(string)
-		if !ok {
-			return nil, fmt.Errorf("chapter %d: title must be a string", n)
-		}
+		title, _ := obj["title"].(string)
 		out = append(out, service.ChapterInput{Start: time.Duration(math.Round(start * float64(time.Second))), Title: title})
 	}
 	return out, nil
-}
-
-// parseTitles reads the rename_chapters list of titles.
-func parseTitles(raw []any) ([]string, error) {
-	return parseStrings(raw, "title")
 }

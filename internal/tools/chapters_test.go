@@ -233,13 +233,10 @@ func TestSetChapters_BadArguments(t *testing.T) {
 		want     string
 	}{
 		{"missing", nil, "missing required parameter: chapters"},
-		{"not an array", "x", "parameter chapters has wrong type: expected []interface {}, got string"},
-		{"start as clock text", []any{map[string]any{"start": "10:00", "title": "A"}}, "chapter 1: start must be a number of seconds"},
 		{"negative start", []any{map[string]any{"start": -5.0, "title": "A"}}, "chapter 1: start must be between 0 and 1000000000 seconds"},
 		{"huge start", []any{map[string]any{"start": 1e12, "title": "A"}}, "chapter 1: start must be between 0 and 1000000000 seconds"},
-		{"missing title", []any{map[string]any{"start": 0.0}}, "chapter 1: title must be a string"},
-		{"not an object", []any{0.0}, "chapter 1 must be an object with start and title"},
-		{"second chapter bad", []any{map[string]any{"start": 0.0, "title": "A"}, map[string]any{"title": "B"}}, "chapter 2: start must be a number of seconds"},
+		{"second chapter out of range", []any{map[string]any{"start": 0.0, "title": "A"}, map[string]any{"start": -1.0, "title": "B"}},
+			"chapter 2: start must be between 0 and 1000000000 seconds"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -284,14 +281,6 @@ func TestRenameChapters(t *testing.T) {
 	})
 
 	assertJSON(t, changeJSON, result)
-}
-
-func TestRenameChapters_BadArguments(t *testing.T) {
-	result := call(t, ChapterTools(NewMockChapterService(t)), "rename_chapters", map[string]any{
-		"itemId": "item-1", "titles": []any{"A", 3.0},
-	})
-
-	assertToolError(t, "title 2 must be a string", result)
 }
 
 func TestRenameChapters_Error(t *testing.T) {

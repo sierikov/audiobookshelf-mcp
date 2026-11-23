@@ -80,8 +80,6 @@ func TestSearchLibrary_InvalidArguments(t *testing.T) {
 
 	assertToolError(t, "missing required parameter: libraryId", call(t, tools, "search_library", map[string]any{"query": "x"}))
 	assertToolError(t, "missing required parameter: query", call(t, tools, "search_library", map[string]any{"libraryId": "lib-1"}))
-	assertToolError(t, "parameter limit: expected number, got string",
-		call(t, tools, "search_library", map[string]any{"libraryId": "lib-1", "query": "x", "limit": "ten"}))
 }
 
 func TestSearchLibrary_Error(t *testing.T) {

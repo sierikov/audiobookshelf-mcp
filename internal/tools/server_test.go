@@ -12,13 +12,19 @@ import (
 // initializes.
 func connect(t *testing.T, srv *mcp.Server) *mcp.InitializeResult {
 	t.Helper()
+	return connectSession(t, srv).InitializeResult()
+}
+
+// connectSession starts srv in memory and returns a client session on it.
+func connectSession(t *testing.T, srv *mcp.Server) *mcp.ClientSession {
+	t.Helper()
 	st, ct := mcp.NewInMemoryTransports()
 	_, err := srv.Connect(t.Context(), st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(t.Context(), ct, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = cs.Close() })
-	return cs.InitializeResult()
+	return cs
 }
 
 func TestNewServer_ReportsVersionAndInstructions(t *testing.T) {
