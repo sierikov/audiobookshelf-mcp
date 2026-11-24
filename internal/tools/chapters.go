@@ -148,7 +148,14 @@ type candidateOutput struct {
 	MatchConfidence    *float64 `json:"matchConfidence,omitempty"`
 }
 
+// sourceAudible is the source of the untrusted results that come from Audible.
+const sourceAudible = "audible"
+
+// audibleSearchOutput starts with the untrusted marker: its candidates come
+// from Audible.
 type audibleSearchOutput struct {
+	Untrusted  bool              `json:"untrusted"`
+	Source     string            `json:"source"`
 	Book       bookRefOutput     `json:"book"`
 	Region     string            `json:"region"`
 	Candidates []candidateOutput `json:"candidates"`
@@ -206,6 +213,8 @@ func searchAudible(svc ChapterService) ServerTool {
 			}
 
 			return marshalledResult(audibleSearchOutput{
+				Untrusted: true,
+				Source:    sourceAudible,
 				Book: bookRefOutput{
 					ID:              res.Book.ID,
 					Title:           res.Book.Title,
@@ -220,7 +229,11 @@ func searchAudible(svc ChapterService) ServerTool {
 	}
 }
 
+// audibleChaptersOutput starts with the untrusted marker: its chapters come
+// from Audible.
 type audibleChaptersOutput struct {
+	Untrusted         bool            `json:"untrusted"`
+	Source            string          `json:"source"`
 	ASIN              string          `json:"asin"`
 	Region            string          `json:"region"`
 	Runtime           string          `json:"runtime"`
@@ -260,6 +273,8 @@ func getAudibleChapters(svc ChapterService) ServerTool {
 			}
 
 			return marshalledResult(audibleChaptersOutput{
+				Untrusted:         true,
+				Source:            sourceAudible,
 				ASIN:              ac.ASIN,
 				Region:            ac.Region,
 				Runtime:           FormatDuration(ac.Runtime),
@@ -292,7 +307,7 @@ func setChapters(svc ChapterService) ServerTool {
 		Toolset: metaChapters,
 		Tool: mcp.Tool{
 			Name:        "set_chapters",
-			Description: "Replace ALL chapters of an audiobook. Show the user the complete list and get their confirmation before calling. Returns the previous chapters; to undo, call again with them.",
+			Description: "Replace ALL chapters of an audiobook. Titles are plain text, at most 200 characters; markup (< or >), control and invisible characters are refused, except in a title equal to the one the chapter at that position already has. Show the user the complete list and get their confirmation before calling. Returns the previous chapters; to undo, call again with them; titles these checks refuse can't be restored.",
 			Annotations: destructiveWriteAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
@@ -305,7 +320,7 @@ func setChapters(svc ChapterService) ServerTool {
 							Type: "object",
 							Properties: map[string]*jsonschema.Schema{
 								"start": {Type: "number", Description: "Start in seconds from the beginning of the book; the first chapter starts at 0"},
-								"title": {Type: "string", Description: "Chapter title"},
+								"title": {Type: "string", Description: "Chapter title, plain text, at most 200 characters"},
 							},
 							Required: []string{"start", "title"},
 						},
@@ -342,7 +357,7 @@ func renameChapters(svc ChapterService) ServerTool {
 		Toolset: metaChapters,
 		Tool: mcp.Tool{
 			Name:        "rename_chapters",
-			Description: "Rename an audiobook's chapters, keeping every timestamp. Pass one title per existing chapter, in order. Show the user the new titles and get their confirmation before calling.",
+			Description: "Rename an audiobook's chapters, keeping every timestamp. Pass one title per existing chapter, in order. New titles are plain text, at most 200 characters; markup (< or >), control and invisible characters are refused, while a title left as it is passes unchanged. Show the user the new titles and get their confirmation before calling.",
 			Annotations: destructiveWriteAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
@@ -350,7 +365,7 @@ func renameChapters(svc ChapterService) ServerTool {
 					"itemId": itemIDSchema(),
 					"titles": {
 						Type:        "array",
-						Description: "New titles, one per existing chapter, in order",
+						Description: "New titles, one per existing chapter, in order; plain text, at most 200 characters",
 						Items:       &jsonschema.Schema{Type: "string"},
 					},
 				},

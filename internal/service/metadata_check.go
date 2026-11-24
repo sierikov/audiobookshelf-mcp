@@ -3,21 +3,9 @@ package service
 import (
 	"cmp"
 	"fmt"
-	"html"
-	"regexp"
 	"slices"
 	"strings"
 )
-
-var htmlTag = regexp.MustCompile(`<[^>]*>`)
-
-// plainText turns an HTML description into plain text. Every tag becomes a
-// space, so block tags never glue words together; entities are decoded and
-// runs of whitespace collapse to one space.
-func plainText(s string) string {
-	s = htmlTag.ReplaceAllString(s, " ")
-	return strings.Join(strings.Fields(html.UnescapeString(s)), " ")
-}
 
 // checkItemIDs returns the ids trimmed. It fails with [ErrNoItems] for none,
 // [ErrTooManyItems] for more than [MaxItemsPerCall], and an [*ItemError] for
@@ -69,6 +57,17 @@ func checkValues(values []string) ([]string, error) {
 		out[j] = v
 	}
 	return out, nil
+}
+
+// checkPlainValues refuses, as a [*ValueError], the first value to add that
+// [checkPlain] refuses with a limit of [MaxValueLength].
+func checkPlainValues(values []string) error {
+	for j, v := range values {
+		if reason := checkPlain(v, MaxValueLength); reason != "" {
+			return &ValueError{Position: j + 1, Reason: fmt.Sprintf("(%s) %s", quoted(v), reason)}
+		}
+	}
+	return nil
 }
 
 // hasValue reports whether list holds v, a trimmed value. Stored values are
@@ -131,7 +130,7 @@ func isMissing(m MetadataItem, f MissingField) bool {
 	case MissingLanguage:
 		return strings.TrimSpace(m.Language) == ""
 	case MissingDescription:
-		return plainText(m.Description) == ""
+		return !hasVisibleText(plainText(m.Description))
 	}
 	return false
 }

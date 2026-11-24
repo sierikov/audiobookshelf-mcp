@@ -106,7 +106,7 @@ func joinMissing(fields []MissingField) string {
 // SearchBooks asks a metadata provider about a book. Title and author
 // default to the book's own. The provider is one of [MetadataProviders],
 // typed in any case; region applies to audible only ("" means
-// [DefaultAudibleRegion]). Candidate descriptions are the provider's HTML.
+// [DefaultAudibleRegion]). Candidates are cleaned as [toCandidates] says.
 func (s *Metadata) SearchBooks(ctx context.Context, itemID, provider, region, title, author string) (MetadataSearch, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	apiProvider, region, err := searchProvider(provider, region)
@@ -149,14 +149,33 @@ func searchProvider(provider, region string) (apiProvider, normalised string, er
 	return provider, "", nil
 }
 
+// toCandidates maps a provider's matches, cleaning their text: the
+// description through [cleanHTML], every other field through [plainText].
 func toCandidates(ms []abs.BookMatch) []MetadataCandidate {
 	out := make([]MetadataCandidate, 0, len(ms))
 	for _, m := range ms {
 		out = append(out, MetadataCandidate{
-			Title: m.Title, Subtitle: m.Subtitle, Author: m.Author, Narrator: m.Narrator,
-			Publisher: m.Publisher, PublishedYear: string(m.PublishedYear), Language: m.Language,
-			Genres: m.Genres, Tags: m.Tags, Description: m.Description,
+			Title: plainText(m.Title), Subtitle: plainText(m.Subtitle),
+			Author: plainText(m.Author), Narrator: plainText(m.Narrator),
+			Publisher: plainText(m.Publisher), PublishedYear: plainText(string(m.PublishedYear)),
+			Language: plainText(m.Language), Genres: plainTexts(m.Genres), Tags: plainTexts(m.Tags),
+			Description: cleanHTML(m.Description),
 		})
+	}
+	return out
+}
+
+// plainTexts returns each value through [plainText], dropping those left
+// empty; nil stays nil.
+func plainTexts(vs []string) []string {
+	if vs == nil {
+		return nil
+	}
+	out := make([]string, 0, len(vs))
+	for _, v := range vs {
+		if v = plainText(v); v != "" {
+			out = append(out, v)
+		}
 	}
 	return out
 }

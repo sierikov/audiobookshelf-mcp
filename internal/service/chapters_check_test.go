@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,7 +16,7 @@ func TestBuildChapters_ComputesEnds(t *testing.T) {
 		{Start: 0, Title: "Opening"},
 		{Start: 600 * time.Second, Title: "One"},
 		{Start: 3000 * time.Second, Title: "Two"},
-	}, time.Hour)
+	}, time.Hour, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, []Chapter{
@@ -25,14 +27,14 @@ func TestBuildChapters_ComputesEnds(t *testing.T) {
 }
 
 func TestBuildChapters_TrimsTitles(t *testing.T) {
-	got, err := buildChapters([]ChapterInput{{Start: 0, Title: "  Opening "}}, time.Hour)
+	got, err := buildChapters([]ChapterInput{{Start: 0, Title: "  Opening "}}, time.Hour, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, []Chapter{{Start: 0, End: time.Hour, Title: "Opening"}}, got)
 }
 
 func TestBuildChapters_EmptyIsAllowed(t *testing.T) {
-	got, err := buildChapters(nil, time.Hour)
+	got, err := buildChapters(nil, time.Hour, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, got)
@@ -64,7 +66,7 @@ func TestBuildChapters_Rejects(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildChapters(tt.in, time.Hour)
+			_, err := buildChapters(tt.in, time.Hour, nil)
 
 			chErr, ok := errors.AsType[*ChapterError](err)
 			require.True(t, ok, "want *ChapterError, got %v", err)
@@ -75,7 +77,7 @@ func TestBuildChapters_Rejects(t *testing.T) {
 }
 
 func TestBuildChapters_FractionalSecondsInErrors(t *testing.T) {
-	_, err := buildChapters([]ChapterInput{{Start: 2500 * time.Millisecond, Title: "A"}}, time.Hour)
+	_, err := buildChapters([]ChapterInput{{Start: 2500 * time.Millisecond, Title: "A"}}, time.Hour, nil)
 
 	require.EqualError(t, err, "chapter 1 starts at 2.5s; the first chapter must start at 0s")
 }
@@ -111,17 +113,63 @@ func TestExactSeconds_Rounds(t *testing.T) {
 }
 
 func TestCheckTitles(t *testing.T) {
-	got, err := checkTitles([]string{" Opening ", "The Storm"})
+	got, err := checkTitles([]string{" Opening ", "The Storm"}, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"Opening", "The Storm"}, got)
 }
 
 func TestCheckTitles_Blank(t *testing.T) {
-	_, err := checkTitles([]string{"A", ""})
+	_, err := checkTitles([]string{"A", ""}, nil)
 
 	chErr, ok := errors.AsType[*ChapterError](err)
 	require.True(t, ok, "want *ChapterError, got %v", err)
 	assert.Equal(t, 2, chErr.Chapter)
 	assert.EqualError(t, err, "chapter 2 has no title")
+}
+
+func TestBuildChapters_RefusesUnsafeTitles(t *testing.T) {
+	long := strings.Repeat("я", MaxChapterTitleLength+1)
+	tests := []struct {
+		name, title, want string
+	}{
+		{"markup", "Part > One", `chapter 2 title ("Part > One") contains ">"; use plain text without markup`},
+		{"too long", long, fmt.Sprintf(`chapter 2 title (%q…) is 201 characters long; at most 200`, strings.Repeat("я", 40))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := buildChapters([]ChapterInput{{Start: 0, Title: "Intro"}, {Start: time.Minute, Title: tt.title}}, time.Hour, nil)
+
+			chErr, ok := errors.AsType[*ChapterError](err)
+			require.True(t, ok, "want *ChapterError, got %v", err)
+			assert.Equal(t, 2, chErr.Chapter)
+			assert.EqualError(t, err, tt.want)
+		})
+	}
+}
+
+func TestBuildChapters_UnchangedTitlePasses(t *testing.T) {
+	stored := []string{"Intro", "A > B\t"}
+
+	got, err := buildChapters([]ChapterInput{{Start: 0, Title: "Intro"}, {Start: time.Minute, Title: "A > B"}}, time.Hour, stored)
+
+	require.NoError(t, err)
+	assert.Equal(t, "A > B", got[1].Title)
+
+	_, err = buildChapters([]ChapterInput{{Start: 0, Title: "A > B"}}, time.Hour, stored)
+
+	require.EqualError(t, err, `chapter 1 title ("A > B") contains ">"; use plain text without markup`, "only the same position counts")
+}
+
+func TestCheckTitles_UnchangedTitlePasses(t *testing.T) {
+	got, err := checkTitles([]string{"New", " <i>Old</i> ", "Newer"}, []string{"One", "<i>Old</i>", "Three"})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"New", "<i>Old</i>", "Newer"}, got)
+}
+
+func TestCheckTitles_RefusesUnsafeTitles(t *testing.T) {
+	_, err := checkTitles([]string{"One", "Two\u202e"}, []string{"One", "Two"})
+
+	require.EqualError(t, err, `chapter 2 title ("Two\u202e") contains the invisible character U+202E`)
 }

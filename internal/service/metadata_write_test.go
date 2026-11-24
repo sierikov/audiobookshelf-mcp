@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -547,4 +548,128 @@ func TestUpdate_RereadFails(t *testing.T) {
 	assert.Equal(t, UpdateResult{Changed: 1, Items: []ItemUpdateResult{{
 		ItemID: "li_1", Title: "Solaris", Previous: ItemFields{Language: new("English")},
 	}}}, got)
+}
+
+// addWrites are the two list methods that add values.
+var addWrites = []struct {
+	name string
+	call func(*Metadata, context.Context, []string, []string) (ListChangeResult, error)
+}{
+	{"AddGenres", (*Metadata).AddGenres},
+	{"AddTags", (*Metadata).AddTags},
+}
+
+func TestAddValues_RefusesUnsafeValues(t *testing.T) {
+	long := strings.Repeat("я", MaxValueLength+1)
+	tests := []struct {
+		name   string
+		values []string
+		want   string
+	}{
+		{"markup", []string{"Fantasy", "<b>X</b>"}, `value 2 ("<b>X</b>") contains "<"; use plain text without markup`},
+		{"too long", []string{long}, fmt.Sprintf(`value 1 (%q…) is 65 characters long; at most 64`, strings.Repeat("я", 40))},
+		{"bidi override", []string{"X\u202e"}, `value 1 ("X\u202e") contains the invisible character U+202E`},
+	}
+	for _, w := range addWrites {
+		for _, tt := range tests {
+			t.Run(w.name+"/"+tt.name, func(t *testing.T) {
+				api := NewMockMetadataAPI(t) // any call fails the test
+
+				_, err := w.call(NewMetadata(api), t.Context(), []string{"li_1"}, tt.values)
+
+				var valueErr *ValueError
+				require.ErrorAs(t, err, &valueErr)
+				assert.EqualError(t, err, tt.want)
+			})
+		}
+	}
+}
+
+func TestRemoveValues_AcceptAnyValue(t *testing.T) {
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1"}).Return([]abs.LibraryItem{
+		listBook("li_1", "Solaris", []string{"<b>junk</b>", "Fantasy\u200b", "Fantasy"}, nil),
+	}, nil)
+	sent := recordUpdates(api, 1)
+
+	_, err := NewMetadata(api).RemoveGenres(t.Context(), []string{"li_1"}, []string{"<b>junk</b>", "Fantasy\u200b"})
+
+	require.NoError(t, err)
+	assertSentJSON(t, `[{"id":"li_1","mediaPayload":{"metadata":{"genres":["Fantasy"]}}}]`, *sent)
+}
+
+func TestUpdate_CleansNewDescription(t *testing.T) {
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1"}).Return([]abs.LibraryItem{nullBook("li_1", "Solaris")}, nil).Once()
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1"}).Return([]abs.LibraryItem{
+		metaBook("li_1", "Solaris", "", "", "", "<p>Blurb</p>", nil, nil),
+	}, nil).Once()
+	sent := recordUpdates(api, 1)
+
+	_, err := NewMetadata(api).Update(t.Context(), []ItemChange{
+		{ItemID: "li_1", Description: new(`<p onclick="x">Blurb</p><script>evil()</script>`)},
+	})
+
+	require.NoError(t, err)
+	assertSentJSON(t, `[{"id":"li_1","mediaPayload":{"metadata":{"description":"<p>Blurb</p>"}}}]`, *sent)
+}
+
+// updateRefused runs an update of one book stored as stored and checks it
+// is refused with want before anything is sent.
+func updateRefused(t *testing.T, stored abs.LibraryItem, change ItemChange, want string) {
+	t.Helper()
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, []string{change.ItemID}).Return([]abs.LibraryItem{stored}, nil).Once()
+
+	_, err := NewMetadata(api).Update(t.Context(), []ItemChange{change})
+
+	var itemErr *ItemError
+	require.ErrorAs(t, err, &itemErr)
+	assert.EqualError(t, err, want)
+}
+
+func TestUpdate_RefusesUnsafeLanguage(t *testing.T) {
+	updateRefused(t, metaBook("li_1", "Solaris", "", "", "English", "", nil, nil),
+		ItemChange{ItemID: "li_1", Language: new("Rus\tsian")},
+		`item 1 (li_1): language ("Rus\tsian") contains the control character U+0009`)
+}
+
+func TestUpdate_RefusesDescriptionWithNoTextLeft(t *testing.T) {
+	const want = `item 1 (li_1): description has no text left once markup outside the allowlist is removed; send "" to clear it`
+	for _, d := range []string{"<div></div>", "\u200b", "<script>x</script>", "<p><img src=x></p>", "<p>\u200e\u200d</p>", "&lrm;"} {
+		t.Run(d, func(t *testing.T) {
+			updateRefused(t, nullBook("li_1", "Solaris"), ItemChange{ItemID: "li_1", Description: new(d)}, want)
+		})
+	}
+}
+
+func TestUpdate_RefusesOverlongDescription(t *testing.T) {
+	updateRefused(t, nullBook("li_1", "Solaris"),
+		ItemChange{ItemID: "li_1", Description: new(strings.Repeat("a", MaxDescriptionLength+1))},
+		`item 1 (li_1): description is 10001 characters long; at most 10000`)
+}
+
+func TestUpdate_UnchangedValuesPass(t *testing.T) {
+	description := "<div>" + strings.Repeat("a", MaxDescriptionLength+1) + "</div>"
+	stored := metaBook("li_1", "Solaris", "", "", " Rus\tsian ", description, nil, nil)
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1"}).Return([]abs.LibraryItem{stored}, nil).Twice()
+	sent := recordUpdates(api, 0)
+
+	_, err := NewMetadata(api).Update(t.Context(), []ItemChange{
+		{ItemID: "li_1", Language: new("Rus\tsian"), Description: new(description)},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, *sent, 1)
+	assert.Equal(t, &abs.MetadataPayload{Language: new("Rus\tsian"), Description: new(description)}, (*sent)[0].MediaPayload.Metadata)
+}
+
+func TestUpdate_ErrorQuotesOnlyTheStartOfALongValue(t *testing.T) {
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1"}).Return([]abs.LibraryItem{nullBook("li_1", "Solaris")}, nil).Once()
+
+	_, err := NewMetadata(api).Update(t.Context(), []ItemChange{{ItemID: "li_1", Language: new(strings.Repeat("a", 16000))}})
+
+	require.EqualError(t, err, fmt.Sprintf(`item 1 (li_1): language (%q…) is 16000 characters long; at most 64`, strings.Repeat("a", 40)))
 }

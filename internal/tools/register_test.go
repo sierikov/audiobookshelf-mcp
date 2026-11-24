@@ -289,3 +289,35 @@ func exampleOf(s *jsonschema.Schema) any {
 		return "x"
 	}
 }
+
+// schemaOf returns the input schema of the named tool.
+func schemaOf(t *testing.T, name string) *jsonschema.Schema {
+	t.Helper()
+	st := findTool(AllTools(Services{}), name)
+	require.NotNil(t, st, name)
+	schema, ok := st.Tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, name)
+	return schema
+}
+
+func TestAllTools_SchemaLengthLimits(t *testing.T) {
+	// Added genres and tags are always checked, so their schema says the limit.
+	assert.Equal(t, new(service.MaxValueLength), schemaOf(t, "add_genres").Properties["genres"].Items.MaxLength)
+	assert.Equal(t, new(service.MaxValueLength), schemaOf(t, "add_tags").Properties["tags"].Items.MaxLength)
+	assert.Nil(t, schemaOf(t, "remove_genres").Properties["genres"].Items.MaxLength, "removes accept any stored value")
+	assert.Nil(t, schemaOf(t, "remove_tags").Properties["tags"].Items.MaxLength, "removes accept any stored value")
+
+	// A language, description or title equal to the stored one passes at any
+	// length, so the limit is in the service and the text, not the schema.
+	item := schemaOf(t, "update_items").Properties["items"].Items
+	assert.Nil(t, item.Properties["language"].MaxLength)
+	assert.Contains(t, item.Properties["language"].Description, "64 characters")
+	assert.Nil(t, item.Properties["description"].MaxLength)
+	assert.Contains(t, item.Properties["description"].Description, "10,000 characters")
+	setTitle := schemaOf(t, "set_chapters").Properties["chapters"].Items.Properties["title"]
+	assert.Nil(t, setTitle.MaxLength)
+	assert.Contains(t, setTitle.Description, "200 characters")
+	renameTitles := schemaOf(t, "rename_chapters").Properties["titles"]
+	assert.Nil(t, renameTitles.Items.MaxLength)
+	assert.Contains(t, renameTitles.Description, "200 characters")
+}

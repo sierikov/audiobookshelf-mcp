@@ -8,25 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPlainText(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"empty", "", ""},
-		{"block tags do not glue words", "<p>One</p><p>Two</p>", "One Two"},
-		{"entities decoded", "Tom &amp; Jerry<br/>end", "Tom & Jerry end"},
-		{"non-breaking space only", "<p>&nbsp;</p>", ""},
-		{"cyrillic unchanged", "Читает Игорь Князев", "Читает Игорь Князев"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, plainText(tt.in))
-		})
-	}
-}
-
 func TestCheckItemIDs(t *testing.T) {
 	t.Run("trims ids", func(t *testing.T) {
 		got, err := checkItemIDs([]string{" li_1", "li_2 "})
@@ -239,6 +220,7 @@ func TestIsMissing(t *testing.T) {
 		want bool
 	}{
 		{"empty html description", MetadataItem{Description: "<p></p>"}, MissingDescription, true},
+		{"invisible-only description", MetadataItem{Description: "<p>\u200e\u200d</p>"}, MissingDescription, true},
 		{"description present", full, MissingDescription, false},
 		{"blank language", MetadataItem{Language: "  "}, MissingLanguage, true},
 		{"language present", full, MissingLanguage, false},

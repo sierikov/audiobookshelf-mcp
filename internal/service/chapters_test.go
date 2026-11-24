@@ -324,3 +324,63 @@ func TestChapters_Rename_NoAudio(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrNoAudio)
 }
+
+func TestChapters_Rename_KeepsBadStoredTitle(t *testing.T) {
+	api := NewMockChaptersAPI(t)
+	api.EXPECT().Item(mock.Anything, "item-1").Return(bookWithChapters("item-1", "Dune", "Frank Herbert", "", 3600,
+		[]abs.Chapter{
+			{ID: 0, Start: 0, End: 600, Title: "One"},
+			{ID: 1, Start: 600, End: 1200, Title: "<i>Old</i>"},
+			{ID: 2, Start: 1200, End: 3600, Title: "Three"},
+		}, oneTrack(3600)), nil)
+	api.EXPECT().SaveChapters(mock.Anything, "item-1", []abs.Chapter{
+		{ID: 0, Start: 0, End: 600, Title: "Opening"},
+		{ID: 1, Start: 600, End: 1200, Title: "<i>Old</i>"},
+		{ID: 2, Start: 1200, End: 3600, Title: "Finale"},
+	}).Return(true, nil)
+
+	_, err := NewChapters(api).Rename(t.Context(), "item-1", []string{"Opening", "<i>Old</i>", "Finale"})
+
+	require.NoError(t, err)
+}
+
+func TestChapters_Set_RefusesUnsafeNewTitle(t *testing.T) {
+	api := NewMockChaptersAPI(t)
+	api.EXPECT().Item(mock.Anything, "item-1").Return(duneWithChapters(), nil)
+
+	_, err := NewChapters(api).Set(t.Context(), "item-1", []ChapterInput{{Start: 0, Title: "<b>Intro</b>"}})
+
+	require.EqualError(t, err, `chapter 1 title ("<b>Intro</b>") contains "<"; use plain text without markup`)
+}
+
+func TestChapters_SearchAudible_CleansProviderText(t *testing.T) {
+	api := NewMockChaptersAPI(t)
+	api.EXPECT().Item(mock.Anything, "item-1").Return(duneWithChapters(), nil)
+	api.EXPECT().SearchBooks(mock.Anything, "audible", "Dune", "Frank Herbert", "item-1").Return([]abs.BookMatch{
+		{Title: "<b>Dune</b>", Narrator: "Name\u200b", ASIN: " B07X1DUNE1 ", Duration: 60},
+	}, nil)
+
+	got, err := NewChapters(api).SearchAudible(t.Context(), "item-1", "", "", "")
+
+	require.NoError(t, err)
+	require.Len(t, got.Matches, 1)
+	m := got.Matches[0]
+	assert.Equal(t, []string{"Dune", "Name", "B07X1DUNE1"}, []string{m.Title, m.Narrator, m.ASIN})
+}
+
+func TestChapters_AudibleChapters_CleansTitles(t *testing.T) {
+	api := NewMockChaptersAPI(t)
+	api.EXPECT().AudibleChapters(mock.Anything, "B002V1OF70", "us").Return(abs.AudibleChapters{
+		ASIN: "<b>B002V1OF70</b>", Region: "us\u200b", RuntimeLengthMs: 3600000,
+		Chapters: []abs.AudibleChapter{
+			{StartOffsetMs: 0, LengthMs: 600000, Title: "<i>Chapter 1</i>"},
+			{StartOffsetMs: 600000, LengthMs: 3000000, Title: "Two\U000E0041"},
+		},
+	}, nil)
+
+	got, err := NewChapters(api).AudibleChapters(t.Context(), "B002V1OF70", "")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Chapter 1", "Two"}, []string{got.Chapters[0].Title, got.Chapters[1].Title})
+	assert.Equal(t, []string{"B002V1OF70", "us"}, []string{got.ASIN, got.Region})
+}

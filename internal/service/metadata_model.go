@@ -77,8 +77,9 @@ type MetadataPage struct {
 	Page  int
 }
 
-// MetadataCandidate is a book as a metadata provider describes it.
-// Description is the provider's HTML.
+// MetadataCandidate is a book as a metadata provider describes it, cleaned:
+// Description is the provider's HTML reduced to the description allowlist,
+// and every other field is plain text.
 type MetadataCandidate struct {
 	Title         string
 	Subtitle      string
@@ -168,6 +169,11 @@ const (
 	MaxDescriptionsPerCall = 10
 	// MaxPageLimit is the most books one page of results may hold.
 	MaxPageLimit = 100
+	// MaxValueLength is the most characters a genre, tag or language written
+	// by the metadata tools may have.
+	MaxValueLength = 64
+	// MaxDescriptionLength is the most characters a new description may have.
+	MaxDescriptionLength = 10000
 )
 
 // Errors returned by the Metadata service. They are wrapped with details, so

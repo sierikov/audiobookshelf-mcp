@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,7 +24,7 @@ type previousOutput[P any] struct {
 func writeFailure[P any](prefix string, err error, previous []previousOutput[P]) (*mcp.CallToolResult, error) {
 	msg := prefix + err.Error()
 	if len(previous) > 0 {
-		if data, mErr := json.Marshal(previous); mErr == nil {
+		if data, mErr := marshalJSON(previous); mErr == nil {
 			msg += "; previous values: " + string(data)
 		}
 	}
@@ -87,7 +86,10 @@ type listWrite struct {
 	errorPrefix string
 	// removes is set for the remove tools, whose books list the values they
 	// lost under removed; the add tools list the values gained under added.
-	removes     bool
+	removes bool
+	// maxLength limits each value in the schema; 0, for the remove tools,
+	// accepts any stored value.
+	maxLength   int
 	annotations *mcp.ToolAnnotations
 	// change is the service method the tool calls, as a method expression, so
 	// the service is not touched until the tool is called.
@@ -105,7 +107,7 @@ func (w listWrite) tool(svc MetadataService) ServerTool {
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
 					"itemIds": itemIDsSchema(),
-					w.plural:  valuesSchema(w.plural),
+					w.plural:  valuesSchema(w.plural, w.maxLength),
 				},
 				Required: []string{"itemIds", w.plural},
 			},
@@ -133,9 +135,10 @@ func (w listWrite) tool(svc MetadataService) ServerTool {
 func addGenres(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "add_genres",
-		description: `Add genres to one or more books (up to 100). Genres a book already has are skipped; a genre it has in another case is an error. Show the user the books and the genres and get their confirmation before calling. To rename a genre, call add_genres with the new name first, then remove_genres with the old one, so no book is left without it; only for a change of case (fiction → Fiction), remove first, because adding a case variant is an error. Each changed book lists the genres it gained in added; to undo, call remove_genres with exactly those genres on that book (books with the same added genres can share one call).`,
+		description: `Add genres to one or more books (up to 100). Genres are plain text, at most 64 characters each; markup (< or >), control and invisible characters are refused. Genres a book already has are skipped; a genre it has in another case is an error. Show the user the books and the genres and get their confirmation before calling. To rename a genre, call add_genres with the new name first, then remove_genres with the old one, so no book is left without it; only for a change of case (fiction → Fiction), remove first, because adding a case variant is an error. Each changed book lists the genres it gained in added; to undo, call remove_genres with exactly those genres on that book (books with the same added genres can share one call).`,
 		plural:      "genres",
 		errorPrefix: "failed to add genres: ",
+		maxLength:   service.MaxValueLength,
 		annotations: additiveWriteAnnotations(),
 		change:      MetadataService.AddGenres,
 	}.tool(svc)
@@ -144,7 +147,7 @@ func addGenres(svc MetadataService) ServerTool {
 func removeGenres(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "remove_genres",
-		description: `Remove genres from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the genre are left unchanged. Show the user the books and the genres and get their confirmation before calling. For a rename, add the new name with add_genres first. Each changed book lists the genres it lost in removed; to undo, call add_genres with exactly those genres on that book (books with the same removed genres can share one call).`,
+		description: `Remove genres from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the genre are left unchanged. Show the user the books and the genres and get their confirmation before calling. For a rename, add the new name with add_genres first. Any genre can be removed, including ones add_genres would refuse. Each changed book lists the genres it lost in removed; to undo, call add_genres with exactly those genres on that book (books with the same removed genres can share one call); a genre add_genres refuses can't be added back.`,
 		plural:      "genres",
 		errorPrefix: "failed to remove genres: ",
 		removes:     true,
@@ -156,9 +159,10 @@ func removeGenres(svc MetadataService) ServerTool {
 func addTags(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "add_tags",
-		description: `Add tags to one or more books (up to 100). Tags a book already has are skipped; a tag it has in another case is an error. Show the user the books and the tags and get their confirmation before calling. To rename a tag, call add_tags with the new name first, then remove_tags with the old one, so no book is left without it; only for a change of case (fiction → Fiction), remove first, because adding a case variant is an error. Each changed book lists the tags it gained in added; to undo, call remove_tags with exactly those tags on that book (books with the same added tags can share one call).`,
+		description: `Add tags to one or more books (up to 100). Tags are plain text, at most 64 characters each; markup (< or >), control and invisible characters are refused. Tags a book already has are skipped; a tag it has in another case is an error. Show the user the books and the tags and get their confirmation before calling. To rename a tag, call add_tags with the new name first, then remove_tags with the old one, so no book is left without it; only for a change of case (fiction → Fiction), remove first, because adding a case variant is an error. Each changed book lists the tags it gained in added; to undo, call remove_tags with exactly those tags on that book (books with the same added tags can share one call).`,
 		plural:      "tags",
 		errorPrefix: "failed to add tags: ",
+		maxLength:   service.MaxValueLength,
 		annotations: additiveWriteAnnotations(),
 		change:      MetadataService.AddTags,
 	}.tool(svc)
@@ -167,7 +171,7 @@ func addTags(svc MetadataService) ServerTool {
 func removeTags(svc MetadataService) ServerTool {
 	return listWrite{
 		name:        "remove_tags",
-		description: `Remove tags from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the tag are left unchanged. Show the user the books and the tags and get their confirmation before calling. For a rename, add the new name with add_tags first. Each changed book lists the tags it lost in removed; to undo, call add_tags with exactly those tags on that book (books with the same removed tags can share one call).`,
+		description: `Remove tags from one or more books (up to 100). Matching is exact, ignoring surrounding spaces; books without the tag are left unchanged. Show the user the books and the tags and get their confirmation before calling. For a rename, add the new name with add_tags first. Any tag can be removed, including ones add_tags would refuse. Each changed book lists the tags it lost in removed; to undo, call add_tags with exactly those tags on that book (books with the same removed tags can share one call); a tag add_tags refuses can't be added back.`,
 		plural:      "tags",
 		errorPrefix: "failed to remove tags: ",
 		removes:     true,
@@ -243,7 +247,7 @@ func updateItems(svc MetadataService) ServerTool {
 		Toolset: metaMetadata,
 		Tool: mcp.Tool{
 			Name:        "update_items",
-			Description: `Set the language and/or description of one or more books (up to 100, at most 10 descriptions per call). Fields left out are not touched; an empty string clears a field. Descriptions may use simple HTML: p, br, b, i, em, strong, ul, ol, li, a. Show the user every change, per book from old to new, and get their confirmation before calling. For genres and tags use add_genres, remove_genres, add_tags and remove_tags. Returns each book's previous values; to undo, call again with them. Example items: [{"itemId":"li_1","language":"Russian"},{"itemId":"li_2","description":"<p>A blurb.</p>"}]`,
+			Description: `Set the language and/or description of one or more books (up to 100, at most 10 descriptions per call). Fields left out are not touched; an empty string clears a field. Descriptions may use simple HTML: p, br, b, i, em, strong, del, ul, ol, li, and a with an http, https or mailto link; other markup, scripts, comments and invisible characters are removed before saving, and now shows what was stored. A description is at most 10,000 characters; a language is plain text, at most 64 characters, without markup, control or invisible characters. A value equal to what the book already has passes as it is. Show the user every change, per book from old to new, and get their confirmation before calling. For genres and tags use add_genres, remove_genres, add_tags and remove_tags. Returns each book's previous values; to undo, call again with them, except that a description comes back cleaned and a value these checks refuse can't be restored. Example items: [{"itemId":"li_1","language":"Russian"},{"itemId":"li_2","description":"<p>A blurb.</p>"}]`,
 			Annotations: destructiveWriteAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
@@ -257,8 +261,8 @@ func updateItems(svc MetadataService) ServerTool {
 							Type: "object",
 							Properties: map[string]*jsonschema.Schema{
 								"itemId":      {Type: "string", Description: "Library item ID of the book (from find_items)"},
-								"language":    {Type: "string", Description: "New language; an empty string clears it"},
-								"description": {Type: "string", Description: "New description, simple HTML; an empty string clears it"},
+								"language":    {Type: "string", Description: "New language, plain text, at most 64 characters; an empty string clears it"},
+								"description": {Type: "string", Description: "New description, simple HTML, at most 10,000 characters; an empty string clears it"},
 							},
 							Required: []string{"itemId"},
 						},

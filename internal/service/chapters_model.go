@@ -88,6 +88,9 @@ type ChapterChange struct {
 // DefaultAudibleRegion is the Audible store searched when none is given.
 const DefaultAudibleRegion = "us"
 
+// MaxChapterTitleLength is the most characters a new chapter title may have.
+const MaxChapterTitleLength = 200
+
 // AudibleRegions returns the Audible store regions Audiobookshelf can search.
 func AudibleRegions() []string {
 	return []string{"us", "ca", "uk", "au", "fr", "de", "jp", "it", "in", "es"}

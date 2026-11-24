@@ -285,11 +285,22 @@ Add to `~/.config/opencode/config.json`:
 The default toolsets are **read-only**. Two opt-in toolsets write, and both need an API token whose user has the **Update** permission in Audiobookshelf. Neither needs admin.
 
 - `chapters`: `set_chapters` and `rename_chapters` replace a book's chapters. They are annotated as destructive so MCP clients ask before running them, and return the previous chapters so a change can be undone when those old chapters were valid.
-- `metadata`: `add_genres`, `remove_genres`, `add_tags` and `remove_tags` add and remove genres and tags, and `update_items` sets language and description. The remove tools and `update_items` are annotated as destructive. Every write can be undone: the list tools by calling the opposite tool with each book's `added` or `removed` values, `update_items` by passing the `previous` values it returns. Audiobookshelf can limit what a user sees by tag, so `add_tags` and `remove_tags` can change what a restricted user, such as a kids account, can see.
+- `metadata`: `add_genres`, `remove_genres`, `add_tags` and `remove_tags` add and remove genres and tags, and `update_items` sets language and description. The remove tools and `update_items` are annotated as destructive. Every write can be undone, except what the text checks below refuse: the list tools by calling the opposite tool with each book's `added` or `removed` values, `update_items` by passing the `previous` values it returns. Audiobookshelf can limit what a user sees by tag, so `add_tags` and `remove_tags` can change what a restricted user, such as a kids account, can see.
 
 `all` includes every write tool; list toolsets explicitly to stay read-only. No tool deletes items, controls playback, or manages users. The API token comes from the settings file (readable only by you) or an environment variable, and is never logged or exposed.
 
 Every call is checked against the tool's input schema before it runs. An unknown argument, a wrong type, or a value out of range is refused with an error that names it, so a misspelled filter or an extra field is never silently ignored.
+
+### Text from other sites
+
+Your own Audiobookshelf is trusted: what the tools read from it is passed on as it is. Text from other sites is not. Three tools return it: `search_book_metadata` (Audible, FantLab, Google Books, iTunes, Open Library, through Audiobookshelf's search), `search_audible` and `get_audible_chapters`. Their results start with `"untrusted": true` and a `source`, and their text is cleaned first: descriptions keep only simple HTML (below), every other field becomes plain text, and invisible characters used to hide text are removed. The server instructions tell the model to treat that text as data, never as instructions. A caveat: much of a library's text first came from such sites, through Audiobookshelf's own matching, or from the audio files' tags. Once stored it counts as trusted like the rest.
+
+What the write tools store is checked first, because that is where text from other sites can enter the library:
+
+- Descriptions (`update_items`) keep only Audiobookshelf's own allowlist: `p`, `ol`, `ul`, `li`, `strong`, `em`, `del`, `br`, `b`, `i`, and `a` with an `http`, `https` or `mailto` link. Scripts, styles, comments, other attributes and invisible characters are removed before saving, whatever Audiobookshelf version runs. A description is at most 10,000 characters, and one with no text left after cleaning is refused.
+- Genres and tags being added, the language, and chapter titles are plain text: a value with `<` or `>`, a control or invisible character, or more than 64 characters (200 for chapter titles) is refused with an error that names it.
+- A language, description or chapter title equal to what the book already has passes as it is, so old values never block an edit. Removing accepts any value, so junk already in the library can still be found and removed.
+- Undo restores the previous values, except what these checks refuse: a description comes back cleaned, and a removed genre or tag the checks refuse can't be added back.
 
 ## Releasing
 

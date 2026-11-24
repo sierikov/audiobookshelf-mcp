@@ -71,7 +71,8 @@ func (s *Chapters) SearchAudible(ctx context.Context, itemID, region, title, aut
 }
 
 // AudibleChapters fetches Audible's chapters for an edition by ASIN in a
-// region ("" means [DefaultAudibleRegion]).
+// region ("" means [DefaultAudibleRegion]). Its text comes through
+// [plainText].
 func (s *Chapters) AudibleChapters(ctx context.Context, asin, region string) (AudibleChapters, error) {
 	_, region, err := audibleProvider(region)
 	if err != nil {
@@ -84,11 +85,11 @@ func (s *Chapters) AudibleChapters(ctx context.Context, asin, region string) (Au
 	chapters := make([]Chapter, 0, len(ac.Chapters))
 	for _, c := range ac.Chapters {
 		start := millis(c.StartOffsetMs)
-		chapters = append(chapters, Chapter{Start: start, End: start + millis(c.LengthMs), Title: c.Title})
+		chapters = append(chapters, Chapter{Start: start, End: start + millis(c.LengthMs), Title: plainText(c.Title)})
 	}
 	return AudibleChapters{
-		ASIN:       ac.ASIN,
-		Region:     cmp.Or(ac.Region, region),
+		ASIN:       plainText(ac.ASIN),
+		Region:     cmp.Or(plainText(ac.Region), region),
 		Runtime:    millis(ac.RuntimeLengthMs),
 		BrandIntro: millis(ac.BrandIntroDurationMs),
 		BrandOutro: millis(ac.BrandOutroDurationMs),
@@ -108,7 +109,7 @@ func (s *Chapters) Set(ctx context.Context, itemID string, chapters []ChapterInp
 	if err != nil {
 		return ChapterChange{}, err
 	}
-	saved, err := buildChapters(chapters, exactSeconds(b.Duration))
+	saved, err := buildChapters(chapters, exactSeconds(b.Duration), titlesOf(b.Chapters))
 	if err != nil {
 		return ChapterChange{}, err
 	}
@@ -120,7 +121,8 @@ func (s *Chapters) Set(ctx context.Context, itemID string, chapters []ChapterInp
 }
 
 // Rename gives a book's chapters new titles, one per existing chapter in
-// order. Times are sent back exactly as they are, unchecked.
+// order, checked as [checkTitle] says. Times are sent back exactly as they
+// are, unchecked.
 func (s *Chapters) Rename(ctx context.Context, itemID string, titles []string) (ChapterChange, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -134,7 +136,7 @@ func (s *Chapters) Rename(ctx context.Context, itemID string, titles []string) (
 	if len(titles) != len(b.Chapters) {
 		return ChapterChange{}, fmt.Errorf("%w: got %d titles for %d chapters", ErrTitleCount, len(titles), len(b.Chapters))
 	}
-	titles, err = checkTitles(titles)
+	titles, err = checkTitles(titles, titlesOf(b.Chapters))
 	if err != nil {
 		return ChapterChange{}, err
 	}
@@ -147,6 +149,15 @@ func (s *Chapters) Rename(ctx context.Context, itemID string, titles []string) (
 		return ChapterChange{}, err
 	}
 	return ChapterChange{Updated: updated, Previous: toChapters(b.Chapters), Saved: toChapters(renamed)}, nil
+}
+
+// titlesOf returns the chapters' titles, in order.
+func titlesOf(cs []abs.Chapter) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.Title
+	}
+	return out
 }
 
 // book fetches an item and decodes it as a book.
@@ -211,13 +222,15 @@ func toAudioFiles(ts []abs.AudioTrack) []AudioFile {
 	return out
 }
 
+// toAudibleMatches maps Audible's matches, with every text field through
+// [plainText].
 func toAudibleMatches(ms []abs.BookMatch, bookDuration time.Duration) []AudibleMatch {
 	out := make([]AudibleMatch, 0, len(ms))
 	for _, m := range ms {
 		runtime := minutes(m.Duration)
 		out = append(out, AudibleMatch{
-			ASIN: m.ASIN, Title: m.Title, Subtitle: m.Subtitle,
-			Author: m.Author, Narrator: m.Narrator, Language: m.Language,
+			ASIN: plainText(m.ASIN), Title: plainText(m.Title), Subtitle: plainText(m.Subtitle),
+			Author: plainText(m.Author), Narrator: plainText(m.Narrator), Language: plainText(m.Language),
 			Abridged: m.Abridged, Runtime: runtime, RuntimeDiff: runtime - bookDuration,
 			MatchConfidence: m.MatchConfidence,
 		})

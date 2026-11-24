@@ -44,12 +44,21 @@
 //
 // The metadata toolset adds and removes genres and tags, and sets language and
 // description. Its remove tools and update_items are annotated destructive.
-// Every write can be undone: the list tools by calling the opposite tool with
-// each book's added or removed values, update_items by passing the previous
-// values it returns. Audiobookshelf can limit what a user sees by tag, so
+// Every write can be undone, except what the text checks below refuse: the
+// list tools by calling the opposite tool with each book's added or removed
+// values, update_items by passing the previous values it returns. Audiobookshelf can limit what a user sees by tag, so
 // add_tags and remove_tags can change what a restricted user, such as a kids
 // account, can see.
 //
 // "all" includes every write tool. No tool deletes items, controls playback,
 // or manages users.
+//
+// The user's Audiobookshelf is trusted; text from other sites is not. The
+// results of search_book_metadata, search_audible and get_audible_chapters
+// start with "untrusted": true and their source, and their text is cleaned
+// in the service layer. On the way in, descriptions are reduced to
+// Audiobookshelf's own HTML allowlist, and genres, tags, language and chapter
+// titles must be plain text within a length limit. A value equal to the
+// stored one passes as it is, and removing accepts any value; undo restores
+// previous values except what those checks refuse.
 package tools

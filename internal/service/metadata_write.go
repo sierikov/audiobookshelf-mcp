@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sierikov/audiobookshelf-mcp/internal/abs"
 )
@@ -89,7 +90,8 @@ func (op listOp) apply(current, values []string) (list, changed []string, confli
 //
 // Before any call it checks the ids (1 to [MaxItemsPerCall], each non-empty
 // and unique after trimming) and the values (at least one, each non-empty,
-// no two equal ignoring case), and uses them trimmed. One call
+// no two equal ignoring case, and on add plain text as [checkPlain] says),
+// and uses them trimmed. One call
 // then reads every book: an unknown id is an [ErrUnknownItems] error and an
 // item that is not a book an [ErrBooksOnly] one. Each book's new list is
 // worked out in the order given; on add, a value the book has in another
@@ -108,6 +110,11 @@ func (s *Metadata) changeLists(ctx context.Context, itemIDs, values []string, fi
 	}
 	if values, err = checkValues(values); err != nil {
 		return ListChangeResult{}, err
+	}
+	if op == addToList {
+		if err := checkPlainValues(values); err != nil {
+			return ListChangeResult{}, err
+		}
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -161,8 +168,8 @@ func caseConflict(existing string, adding []string) string {
 // One call reads every book for Previous, which holds only the fields being
 // set, as stored: a null reads as "" and a description is its HTML. An
 // unknown id is an [ErrUnknownItems] error and an item that is not a book
-// an [ErrBooksOnly] one. One call then sends only the fields given; an
-// empty string clears a field.
+// an [ErrBooksOnly] one. New values are then checked as [checkFields] says.
+// One call sends only the fields given; an empty string clears a field.
 // Changed is Audiobookshelf's count of books that changed. A second read
 // gives Now, with the same fields as Previous. Items has every book in the
 // order given.
@@ -181,6 +188,11 @@ func (s *Metadata) Update(ctx context.Context, changes []ItemChange) (UpdateResu
 	before, err := s.readBooks(ctx, ids)
 	if err != nil {
 		return UpdateResult{}, err
+	}
+	for i, c := range changes {
+		if changes[i], err = checkFields(c, before[i], i+1); err != nil {
+			return UpdateResult{}, err
+		}
 	}
 	res := UpdateResult{Items: make([]ItemUpdateResult, len(changes))}
 	updates := make([]abs.ItemUpdate, len(changes))
@@ -240,6 +252,47 @@ func trimmed(s *string) *string {
 		return nil
 	}
 	return new(strings.TrimSpace(*s))
+}
+
+// checkFields checks the fields c sets on book b, the change at position
+// pos, and returns c with its description cleaned. An empty string, which
+// clears, and a value equal to the stored one, both trimmed, pass untouched.
+// A new language must pass [checkPlain]; a new description must be at most
+// [MaxDescriptionLength] characters and keep some text through [cleanHTML].
+// A failure is an [*ItemError].
+func checkFields(c ItemChange, b *abs.BookMedia, pos int) (ItemChange, error) {
+	if isNew(c.Language, b.Metadata.Language) {
+		if reason := checkPlain(*c.Language, MaxValueLength); reason != "" {
+			return c, &ItemError{Position: pos, ItemID: c.ItemID, Reason: fmt.Sprintf("language (%s) %s", quoted(*c.Language), reason)}
+		}
+	}
+	if isNew(c.Description, b.Metadata.Description) {
+		cleaned, reason := cleanDescription(*c.Description)
+		if reason != "" {
+			return c, &ItemError{Position: pos, ItemID: c.ItemID, Reason: reason}
+		}
+		c.Description = &cleaned
+	}
+	return c, nil
+}
+
+// isNew reports whether v sets a value that is neither empty nor, trimmed,
+// the stored one.
+func isNew(v *string, stored string) bool {
+	return v != nil && *v != "" && strings.TrimSpace(*v) != strings.TrimSpace(stored)
+}
+
+// cleanDescription returns a new description through [cleanHTML], or why it
+// is refused: too long as sent, or no text left once cleaned.
+func cleanDescription(s string) (cleaned, reason string) {
+	if n := utf8.RuneCountInString(s); n > MaxDescriptionLength {
+		return "", fmt.Sprintf("description is %d characters long; at most %d", n, MaxDescriptionLength)
+	}
+	cleaned = cleanHTML(s)
+	if !hasVisibleText(plainText(cleaned)) {
+		return "", `description has no text left once markup outside the allowlist is removed; send "" to clear it`
+	}
+	return cleaned, ""
 }
 
 // storedFields returns the book's stored values for the fields c sets. A

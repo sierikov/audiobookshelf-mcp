@@ -1,10 +1,12 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -108,6 +110,7 @@ func TestSearchAudible(t *testing.T) {
 	result := call(t, ChapterTools(svc), "search_audible", map[string]any{"itemId": "item-1", "region": "de"})
 
 	assertJSON(t, `{
+		"untrusted":true,"source":"audible",
 		"book":{"id":"item-1","title":"Dune","author":"Frank Herbert","duration":"1h 0m","durationSeconds":3600},
 		"region":"de",
 		"candidates":[
@@ -131,6 +134,7 @@ func TestSearchAudible_PassesTitleAndAuthor(t *testing.T) {
 	})
 
 	assertJSON(t, `{
+		"untrusted":true,"source":"audible",
 		"book":{"id":"item-1","title":"Dune","author":"Frank Herbert","duration":"1h 0m","durationSeconds":3600},
 		"region":"us","candidates":[]
 	}`, result)
@@ -156,6 +160,7 @@ func TestGetAudibleChapters(t *testing.T) {
 	result := call(t, ChapterTools(svc), "get_audible_chapters", map[string]any{"asin": "B002V1OF70"})
 
 	assertJSON(t, `{
+		"untrusted":true,"source":"audible",
 		"asin":"B002V1OF70","region":"us","runtime":"1h 0m","runtimeSeconds":3600,"accurate":true,
 		"brandIntroSeconds":2.043,"brandOutroSeconds":5.061,
 		"chapters":[{"start":0,"end":3600,"startTime":"0:00:00","title":"Chapter 1"}]
@@ -290,4 +295,30 @@ func TestRenameChapters_Error(t *testing.T) {
 	result := call(t, ChapterTools(svc), "rename_chapters", map[string]any{"itemId": "item-1", "titles": []any{"A"}})
 
 	assertToolError(t, "failed to rename chapters: ABS API 500: boom", result)
+}
+
+// TestUntrustedResults_StartWithTheMarker checks that the three tools whose
+// results come from third-party sites say so before anything else.
+func TestUntrustedResults_StartWithTheMarker(t *testing.T) {
+	metadata := NewMockMetadataService(t)
+	metadata.EXPECT().SearchBooks(mock.Anything, "li_1", "fantlab", "", "", "").Return(service.MetadataSearch{Provider: "fantlab"}, nil)
+	chapters := NewMockChapterService(t)
+	chapters.EXPECT().SearchAudible(mock.Anything, "li_1", "", "", "").Return(service.AudibleSearch{}, nil)
+	chapters.EXPECT().AudibleChapters(mock.Anything, "B002V1OF70", "").Return(service.AudibleChapters{}, nil)
+
+	results := map[string]*mcp.CallToolResult{
+		`{"untrusted":true,"source":"fantlab",`: call(t, MetadataTools(metadata), "search_book_metadata", map[string]any{"itemId": "li_1", "provider": "fantlab"}),
+		`{"untrusted":true,"source":"audible",`: call(t, ChapterTools(chapters), "search_audible", map[string]any{"itemId": "li_1"}),
+	}
+	for prefix, result := range results {
+		assert.True(t, strings.HasPrefix(resultText(result), prefix), "%s does not start with %s", resultText(result), prefix)
+	}
+	result := call(t, ChapterTools(chapters), "get_audible_chapters", map[string]any{"asin": "B002V1OF70"})
+	assert.True(t, strings.HasPrefix(resultText(result), `{"untrusted":true,"source":"audible",`), resultText(result))
+}
+
+func TestSetChapters_DescriptionSaysUndoCanBeRefused(t *testing.T) {
+	tool := findTool(ChapterTools(nil), "set_chapters")
+
+	assert.Contains(t, tool.Tool.Description, "to undo, call again with them; titles these checks refuse can't be restored.")
 }

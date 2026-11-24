@@ -38,18 +38,19 @@ func audibleProvider(region string) (provider, normalised string, err error) {
 }
 
 // buildChapters checks a proposed chapter list against a book that ends at
-// bookEnd and returns it with trimmed titles and computed ends. Each chapter
-// ends where the next starts; the last ends with the book. The first failing
-// chapter is reported as a [*ChapterError]. An empty list is valid.
-func buildChapters(in []ChapterInput, bookEnd time.Duration) ([]Chapter, error) {
+// bookEnd, whose chapters are titled stored, and returns it with trimmed
+// titles and computed ends. Each chapter ends where the next starts; the last
+// ends with the book. Titles are checked as [checkTitle] says. The first
+// failing chapter is reported as a [*ChapterError]. An empty list is valid.
+func buildChapters(in []ChapterInput, bookEnd time.Duration, stored []string) ([]Chapter, error) {
 	out := make([]Chapter, len(in))
 	for i, c := range in {
 		if err := checkStart(in, i, bookEnd); err != nil {
 			return nil, err
 		}
-		title := strings.TrimSpace(c.Title)
-		if title == "" {
-			return nil, &ChapterError{Chapter: i + 1, Reason: "has no title"}
+		title, err := checkTitle(c.Title, i, stored)
+		if err != nil {
+			return nil, err
 		}
 		end := bookEnd
 		if i+1 < len(in) {
@@ -76,14 +77,33 @@ func checkStart(in []ChapterInput, i int, bookEnd time.Duration) error {
 }
 
 // checkTitles returns the titles trimmed, or a [*ChapterError] for the first
-// one that is blank.
-func checkTitles(titles []string) ([]string, error) {
+// one [checkTitle] refuses, given the book's stored titles.
+func checkTitles(titles, stored []string) ([]string, error) {
 	out := make([]string, len(titles))
 	for i, t := range titles {
-		out[i] = strings.TrimSpace(t)
-		if out[i] == "" {
-			return nil, &ChapterError{Chapter: i + 1, Reason: "has no title"}
+		title, err := checkTitle(t, i, stored)
+		if err != nil {
+			return nil, err
 		}
+		out[i] = title
 	}
 	return out, nil
+}
+
+// checkTitle returns the title of chapter i trimmed. A blank title is
+// refused. A title equal to the stored title of the same chapter, both
+// trimmed, passes as it is; any other must pass [checkPlain] with a limit of
+// [MaxChapterTitleLength]. A failure is a [*ChapterError].
+func checkTitle(title string, i int, stored []string) (string, error) {
+	title = strings.TrimSpace(title)
+	switch {
+	case title == "":
+		return "", &ChapterError{Chapter: i + 1, Reason: "has no title"}
+	case i < len(stored) && title == strings.TrimSpace(stored[i]):
+		return title, nil
+	}
+	if reason := checkPlain(title, MaxChapterTitleLength); reason != "" {
+		return "", &ChapterError{Chapter: i + 1, Reason: fmt.Sprintf("title (%s) %s", quoted(title), reason)}
+	}
+	return title, nil
 }
