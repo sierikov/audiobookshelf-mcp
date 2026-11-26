@@ -2,6 +2,7 @@ package abs_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"testing"
@@ -456,11 +457,187 @@ func TestLastBodyFor_ReturnsBodyOfThatPath(t *testing.T) {
 func TestClient_Me(t *testing.T) {
 	c, _ := newClient(t, map[string]any{"/api/me": map[string]any{
 		"id": "u1", "username": "artem", "type": "root",
-		"permissions": map[string]any{"update": true, "delete": false},
+		"permissions": map[string]any{"update": true, "delete": false, "upload": true},
 	}})
 
 	u, err := c.Me(t.Context())
 
 	require.NoError(t, err)
-	assert.Equal(t, abs.User{ID: "u1", Username: "artem", Type: "root", Permissions: abs.UserPermissions{Update: true}}, u)
+	assert.Equal(t, abs.User{ID: "u1", Username: "artem", Type: "root", Permissions: abs.UserPermissions{Update: true, Upload: true}}, u)
+}
+
+func TestSeries_AsksForProgress(t *testing.T) {
+	c, srv := newClient(t, map[string]any{"/api/series/s1": map[string]any{
+		"id": "s1", "name": "Holly Gibney",
+		"progress": map[string]any{"libraryItemIds": []string{"li_1", "li_3"}},
+	}})
+
+	series, err := c.Series(t.Context(), "s1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "progress", query(srv).Get("include"))
+	require.NotNil(t, series.Progress)
+	assert.Equal(t, []string{"li_1", "li_3"}, series.Progress.LibraryItemIDs)
+}
+
+func TestSeries_WithoutProgress(t *testing.T) {
+	c, _ := newClient(t, map[string]any{"/api/series/s1": map[string]any{"id": "s1", "name": "Holly Gibney"}})
+
+	series, err := c.Series(t.Context(), "s1")
+
+	require.NoError(t, err)
+	assert.Nil(t, series.Progress)
+}
+
+func TestItem_DecodesAuthorsNarratorsAndSeries(t *testing.T) {
+	c, _ := newClient(t, map[string]any{"/api/items/li_1": abstest.BookItemFull("li_1", map[string]any{
+		"title":     "Holly",
+		"authors":   []any{map[string]any{"id": "au_1", "name": "Stephen King"}},
+		"narrators": []string{"Will Patton"},
+		"series":    []any{map[string]any{"id": "s1", "name": "Holly Gibney", "sequence": "3"}},
+	}, 60)})
+
+	item, err := c.Item(t.Context(), "li_1")
+	require.NoError(t, err)
+	book, err := item.AsBook()
+
+	require.NoError(t, err)
+	assert.Equal(t, []abs.AuthorRef{{ID: "au_1", Name: "Stephen King"}}, book.Metadata.Authors)
+	assert.Equal(t, []string{"Will Patton"}, book.Metadata.Narrators)
+	assert.Equal(t, abs.FlexSeries{{ID: "s1", Name: "Holly Gibney", Sequence: "3"}}, book.Metadata.Series)
+}
+
+func TestSearchCovers(t *testing.T) {
+	c, srv := newClient(t, map[string]any{"/api/search/covers": map[string]any{
+		"results": []string{"https://a/1.jpg", "https://b/2.jpg"},
+	}})
+
+	urls, err := c.SearchCovers(t.Context(), "google", "Holly", "Stephen King")
+
+	require.NoError(t, err)
+	assert.Equal(t, url.Values{"provider": {"google"}, "title": {"Holly"}, "author": {"Stephen King"}}, query(srv))
+	assert.Equal(t, []string{"https://a/1.jpg", "https://b/2.jpg"}, urls)
+}
+
+func TestSearchCovers_ErrorIsStatusError(t *testing.T) {
+	c, _ := newClient(t, map[string]any{})
+
+	_, err := c.SearchCovers(t.Context(), "google", "Holly", "")
+
+	var se *abs.StatusError
+	require.ErrorAs(t, err, &se)
+	assert.Equal(t, http.StatusNotFound, se.StatusCode)
+}
+
+func TestItemCover(t *testing.T) {
+	jpegBytes := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00, 0xff, 0xd9}
+
+	t.Run("returns the bytes and the MIME type", func(t *testing.T) {
+		c, srv := newClient(t, map[string]any{
+			"/api/items/li_1/cover": abstest.Raw{Status: http.StatusOK, ContentType: "image/jpeg", Body: jpegBytes},
+		})
+
+		img, err := c.ItemCover(t.Context(), "li_1", 400)
+
+		require.NoError(t, err)
+		assert.Equal(t, url.Values{"width": {"400"}, "format": {"jpeg"}}, query(srv))
+		assert.Equal(t, abs.Image{Data: jpegBytes, MIMEType: "image/jpeg"}, img)
+	})
+
+	t.Run("drops parameters from the MIME type", func(t *testing.T) {
+		c, _ := newClient(t, map[string]any{
+			"/api/items/li_1/cover": abstest.Raw{Status: http.StatusOK, ContentType: "image/jpeg; charset=binary", Body: jpegBytes},
+		})
+
+		img, err := c.ItemCover(t.Context(), "li_1", 400)
+
+		require.NoError(t, err)
+		assert.Equal(t, "image/jpeg", img.MIMEType)
+	})
+
+	t.Run("a book without a cover is a 404 status error", func(t *testing.T) {
+		c, _ := newClient(t, map[string]any{"/api/items/li_1/cover": abstest.Raw{Status: http.StatusNotFound}})
+
+		_, err := c.ItemCover(t.Context(), "li_1", 400)
+
+		var se *abs.StatusError
+		require.ErrorAs(t, err, &se)
+		assert.Equal(t, http.StatusNotFound, se.StatusCode)
+	})
+
+	t.Run("a body of exactly the limit is accepted", func(t *testing.T) {
+		body := make([]byte, abs.MaxImageBytes)
+		c, _ := newClient(t, map[string]any{
+			"/api/items/li_1/cover": abstest.Raw{Status: http.StatusOK, ContentType: "image/jpeg", Body: body},
+		})
+
+		img, err := c.ItemCover(t.Context(), "li_1", 400)
+
+		require.NoError(t, err)
+		assert.Len(t, img.Data, abs.MaxImageBytes)
+	})
+
+	t.Run("a body over the limit is refused", func(t *testing.T) {
+		body := make([]byte, abs.MaxImageBytes+1)
+		c, _ := newClient(t, map[string]any{
+			"/api/items/li_1/cover": abstest.Raw{Status: http.StatusOK, ContentType: "image/jpeg", Body: body},
+		})
+
+		_, err := c.ItemCover(t.Context(), "li_1", 400)
+
+		require.ErrorContains(t, err, "2 MiB")
+	})
+}
+
+func TestSetCoverURL(t *testing.T) {
+	t.Run("posts the URL", func(t *testing.T) {
+		c, srv := newClient(t, map[string]any{
+			"/api/items/li_1/cover": map[string]any{"success": true, "cover": "/metadata/items/li_1/cover.jpg"},
+		})
+
+		err := c.SetCoverURL(t.Context(), "li_1", "https://a/1.jpg")
+
+		require.NoError(t, err)
+		assert.Equal(t, http.MethodPost, srv.LastRequest().Method)
+		assert.JSONEq(t, `{"url":"https://a/1.jpg"}`, string(srv.LastBodyFor("/api/items/li_1/cover")))
+	})
+
+	t.Run("a refusal is a status error", func(t *testing.T) {
+		c, _ := newClient(t, map[string]any{
+			"/api/items/li_1/cover": abstest.Raw{Status: http.StatusForbidden, ContentType: "text/plain", Body: []byte("Forbidden")},
+		})
+
+		err := c.SetCoverURL(t.Context(), "li_1", "https://a/1.jpg")
+
+		var se *abs.StatusError
+		require.ErrorAs(t, err, &se)
+		assert.Equal(t, http.StatusForbidden, se.StatusCode)
+		assert.Equal(t, "Forbidden", se.Body)
+	})
+}
+
+func TestUpdateItems_SeriesAuthorsNarrators(t *testing.T) {
+	payload := abs.MediaPayload{Metadata: &abs.MetadataPayload{
+		Series:    &[]abs.SeriesRef{{Name: "Holly Gibney", Sequence: "3"}},
+		Authors:   &[]abs.AuthorRef{{Name: "Stephen King"}},
+		Narrators: &[]string{"Will Patton"},
+	}}
+
+	got, err := json.Marshal(payload)
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"metadata":{"series":[{"name":"Holly Gibney","sequence":"3"}],"authors":[{"name":"Stephen King"}],"narrators":["Will Patton"]}}`, string(got))
+}
+
+func TestUpdateItems_EmptyListsAreSent(t *testing.T) {
+	payload := abs.MediaPayload{Metadata: &abs.MetadataPayload{
+		Series:    &[]abs.SeriesRef{},
+		Authors:   &[]abs.AuthorRef{},
+		Narrators: &[]string{},
+	}}
+
+	got, err := json.Marshal(payload)
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"metadata":{"series":[],"authors":[],"narrators":[]}}`, string(got))
 }

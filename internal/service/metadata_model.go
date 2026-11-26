@@ -131,18 +131,33 @@ type ListChangeResult struct {
 	Items   []ListChange
 }
 
-// ItemChange is a requested change to one book. A nil field is left alone.
+// SeriesEntry places a book in a series. Sequence is free text such as "1",
+// "1.5" or "0", and empty when the book has no number.
+type SeriesEntry struct {
+	Name, Sequence string
+}
+
+// ItemChange is a requested change to one book. A nil field is left alone;
+// a pointer to an empty list removes every series, author or narrator the
+// book has, and any other list replaces what the book has.
 type ItemChange struct {
 	ItemID      string
 	Language    *string
 	Description *string
+	Series      *[]SeriesEntry
+	Authors     *[]string
+	Narrators   *[]string
 }
 
-// ItemFields is a book's language and description. A nil field was not part
-// of the change.
+// ItemFields is a book's language, description, series, authors and
+// narrators. A nil field was not part of the change; a list that was is
+// never nil, and an empty one is a book with none.
 type ItemFields struct {
 	Language    *string
 	Description *string
+	Series      *[]SeriesEntry
+	Authors     *[]string
+	Narrators   *[]string
 }
 
 // ItemUpdateResult is the outcome for one book of an update: the fields
@@ -169,11 +184,13 @@ const (
 	MaxDescriptionsPerCall = 10
 	// MaxPageLimit is the most books one page of results may hold.
 	MaxPageLimit = 100
-	// MaxValueLength is the most characters a genre, tag or language written
-	// by the metadata tools may have.
+	// MaxValueLength is the most characters a genre, tag, language, series,
+	// author or narrator written by the metadata tools may have.
 	MaxValueLength = 64
 	// MaxDescriptionLength is the most characters a new description may have.
 	MaxDescriptionLength = 10000
+	// MaxSequenceLength is the most characters a new series sequence may have.
+	MaxSequenceLength = 16
 )
 
 // Errors returned by the Metadata service. They are wrapped with details, so

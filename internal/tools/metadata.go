@@ -324,11 +324,16 @@ func toMetadataCandidates(cs []service.MetadataCandidate) []metadataCandidateOut
 	return out
 }
 
-func searchBookMetadata(svc MetadataService) ServerTool {
+// providerEnum lists the metadata providers as the values a schema allows.
+func providerEnum() []any {
 	providers := make([]any, 0, len(service.MetadataProviders()))
 	for _, p := range service.MetadataProviders() {
 		providers = append(providers, p)
 	}
+	return providers
+}
+
+func searchBookMetadata(svc MetadataService) ServerTool {
 	region := regionSchema()
 	region.Description = "Audible store region, for the audible provider only (default us)"
 	return ServerTool{
@@ -341,7 +346,7 @@ func searchBookMetadata(svc MetadataService) ServerTool {
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
 					"itemId":   itemIDSchema(),
-					"provider": {Type: "string", Enum: providers, Description: "Metadata source to search"},
+					"provider": {Type: "string", Enum: providerEnum(), Description: "Metadata source to search"},
 					"region":   region,
 					"title":    {Type: "string", Description: "Title to search for (default: the book's title)"},
 					"author":   {Type: "string", Description: "Author to search for (default: the book's author)"},

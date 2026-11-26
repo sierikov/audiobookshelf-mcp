@@ -49,26 +49,33 @@ func (s *BrowseWiringSuite) TestListSeries() {
 	s.Equal(0, out.Series[1].NumBooks)
 }
 
-func (s *BrowseWiringSuite) TestGetSeries() {
-	s.routes["/api/series/s-1"] = map[string]any{
-		"id": "s-1", "name": "Stormlight Archive", "description": "Epic fantasy",
-		"books": []map[string]any{
-			abstest.BookItem("b1", "The Way of Kings", "Brandon Sanderson", 190800.0),
+func (s *BrowseWiringSuite) TestGetSeries_FullStack() {
+	s.routes["/api/series/s1"] = map[string]any{
+		"id": "s1", "name": "Holly Gibney", "description": "Crime",
+		"progress": map[string]any{"libraryItemIds": []string{"li_holly", "li_outsider"}},
+	}
+	// The batch endpoint expands items, so metadata.series is an array.
+	s.routes["/api/items/batch/get"] = map[string]any{
+		"libraryItems": []map[string]any{
+			abstest.BookItemFull("li_holly", map[string]any{
+				"title": "Holly", "authorName": "Stephen King",
+				"series": []map[string]any{{"id": "s1", "name": "Holly Gibney", "sequence": "3"}},
+			}, 36000.0),
+			abstest.BookItemFull("li_outsider", map[string]any{
+				"title": "The Outsider", "authorName": "Stephen King",
+				"series": []map[string]any{{"id": "s1", "name": "Holly Gibney", "sequence": "1"}},
+			}, 54000.0),
 		},
 	}
 	s.StartServer()
 
-	tool := s.tool("get_series")
-	result := s.callTool(tool, map[string]any{"seriesId": "s-1"})
+	result := s.callTool(s.tool("get_series"), map[string]any{"seriesId": "s1"})
 
-	var d seriesDetail
-	s.resultJSON(result, &d)
-
-	s.Equal("Stormlight Archive", d.Name)
-	s.Equal("Epic fantasy", d.Description)
-	s.Require().Len(d.Books, 1)
-	s.Equal("The Way of Kings", d.Books[0].Title)
-	s.Equal("53h 0m", d.Books[0].Duration)
+	s.JSONEq(`{"id":"s1","name":"Holly Gibney","description":"Crime","books":[
+		{"id":"li_outsider","mediaType":"book","title":"The Outsider","author":"Stephen King","duration":"15h 0m","sequence":"1"},
+		{"id":"li_holly","mediaType":"book","title":"Holly","author":"Stephen King","duration":"10h 0m","sequence":"3"}
+	]}`, resultText(result))
+	s.NotContains(resultText(result), `"books":null`)
 }
 
 func (s *BrowseWiringSuite) TestGetAuthor() {

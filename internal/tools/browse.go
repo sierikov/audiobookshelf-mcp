@@ -68,11 +68,17 @@ func listSeries(svc BrowseService) ServerTool {
 	}
 }
 
+// seriesBook is a book of a series; Sequence is left out for a book without a number.
+type seriesBook struct {
+	libraryItemSummary
+	Sequence string `json:"sequence,omitempty"`
+}
+
 type seriesDetail struct {
-	ID          string               `json:"id"`
-	Name        string               `json:"name"`
-	Description string               `json:"description,omitempty"`
-	Books       []libraryItemSummary `json:"books"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description,omitempty"`
+	Books       []seriesBook `json:"books"`
 }
 
 func getSeries(svc BrowseService) ServerTool {
@@ -80,14 +86,14 @@ func getSeries(svc BrowseService) ServerTool {
 		Toolset: metaBrowse,
 		Tool: mcp.Tool{
 			Name:        "get_series",
-			Description: "Get details of a series including its books",
+			Description: "Get details of a series including its books, in reading order, each with its number in the series when it has one",
 			Annotations: readAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
 					"seriesId": {
 						Type:        "string",
-						Description: "Series ID",
+						Description: "Series ID (from list_series or search_library)",
 					},
 				},
 				Required: []string{"seriesId"},
@@ -104,9 +110,9 @@ func getSeries(svc BrowseService) ServerTool {
 				return errResult("failed to get series: " + err.Error())
 			}
 
-			detail := seriesDetail{ID: s.ID, Name: s.Name, Description: s.Description}
+			detail := seriesDetail{ID: s.ID, Name: s.Name, Description: s.Description, Books: make([]seriesBook, 0, len(s.Books))}
 			for _, b := range s.Books {
-				detail.Books = append(detail.Books, toLibraryItemSummary(b))
+				detail.Books = append(detail.Books, seriesBook{libraryItemSummary: toLibraryItemSummary(b.Item), Sequence: b.Sequence})
 			}
 			return marshalledResult(detail)
 		},

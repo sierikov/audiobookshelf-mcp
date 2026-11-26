@@ -180,11 +180,51 @@ func removeTags(svc MetadataService) ServerTool {
 	}.tool(svc)
 }
 
-// itemFieldsOutput is a book's language and description. A field that was not
-// part of the change is left out; one that was sent and is empty shows as "".
+// seriesOutput is a book's place in one series; a book with no number leaves
+// the sequence out, as update_items takes it.
+type seriesOutput struct {
+	Name     string `json:"name"`
+	Sequence string `json:"sequence,omitempty"`
+}
+
+// itemFieldsOutput is a book's fields as update_items takes them. A field
+// that was not part of the change is left out; one that was sent and is empty
+// shows as "" or [].
 type itemFieldsOutput struct {
-	Language    *string `json:"language,omitempty"`
-	Description *string `json:"description,omitempty"`
+	Language    *string        `json:"language,omitempty"`
+	Description *string        `json:"description,omitempty"`
+	Series      []seriesOutput `json:"series,omitzero"`
+	Authors     []string       `json:"authors,omitzero"`
+	Narrators   []string       `json:"narrators,omitzero"`
+}
+
+// toSeriesOutput maps a book's series. Nil stays nil, which omitzero leaves
+// out; any other list, even an empty one, shows as a list.
+func toSeriesOutput(list []service.SeriesEntry) []seriesOutput {
+	if list == nil {
+		return nil
+	}
+	out := make([]seriesOutput, 0, len(list))
+	for _, e := range list {
+		out = append(out, seriesOutput(e))
+	}
+	return out
+}
+
+// toFieldsOutput maps a book's fields. A list the service left nil was not
+// part of the change; the others are never nil, so an empty one shows as [].
+func toFieldsOutput(f service.ItemFields) itemFieldsOutput {
+	out := itemFieldsOutput{Language: f.Language, Description: f.Description}
+	if f.Series != nil {
+		out.Series = toSeriesOutput(*f.Series)
+	}
+	if f.Authors != nil {
+		out.Authors = nonNil(*f.Authors)
+	}
+	if f.Narrators != nil {
+		out.Narrators = nonNil(*f.Narrators)
+	}
+	return out
 }
 
 type itemUpdateOutput struct {
@@ -205,8 +245,8 @@ func toUpdateItems(items []service.ItemUpdateResult) []itemUpdateOutput {
 		out = append(out, itemUpdateOutput{
 			ItemID:   it.ItemID,
 			Title:    it.Title,
-			Previous: itemFieldsOutput(it.Previous),
-			Now:      itemFieldsOutput(it.Now),
+			Previous: toFieldsOutput(it.Previous),
+			Now:      toFieldsOutput(it.Now),
 		})
 	}
 	return out
@@ -215,7 +255,7 @@ func toUpdateItems(items []service.ItemUpdateResult) []itemUpdateOutput {
 func toUpdatePrevious(items []service.ItemUpdateResult) []previousOutput[itemFieldsOutput] {
 	out := make([]previousOutput[itemFieldsOutput], 0, len(items))
 	for _, it := range items {
-		out = append(out, previousOutput[itemFieldsOutput]{ItemID: it.ItemID, Title: it.Title, Previous: itemFieldsOutput(it.Previous)})
+		out = append(out, previousOutput[itemFieldsOutput]{ItemID: it.ItemID, Title: it.Title, Previous: toFieldsOutput(it.Previous)})
 	}
 	return out
 }
@@ -227,7 +267,14 @@ func parseItemChanges(raw []any) []service.ItemChange {
 	for _, entry := range raw {
 		obj, _ := entry.(map[string]any)
 		id, _ := obj["itemId"].(string)
-		out = append(out, service.ItemChange{ItemID: id, Language: optionalString(obj, "language"), Description: optionalString(obj, "description")})
+		out = append(out, service.ItemChange{
+			ItemID:      id,
+			Language:    optionalString(obj, "language"),
+			Description: optionalString(obj, "description"),
+			Series:      optionalSeries(obj),
+			Authors:     optionalList(obj, "authors"),
+			Narrators:   optionalList(obj, "narrators"),
+		})
 	}
 	return out
 }
@@ -242,12 +289,45 @@ func optionalString(obj map[string]any, name string) *string {
 	return &s
 }
 
+// optionalList returns the named list of strings, or nil when it is left out.
+// A list sent as [] is a pointer to an empty list, which removes the values.
+func optionalList(obj map[string]any, name string) *[]string {
+	raw, ok := obj[name].([]any)
+	if !ok {
+		return nil
+	}
+	return new(stringsOf(raw))
+}
+
+// optionalSeries returns the series list, or nil when it is left out. The
+// schema has checked that each entry has a name; a sequence left out is "".
+func optionalSeries(obj map[string]any) *[]service.SeriesEntry {
+	raw, ok := obj["series"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]service.SeriesEntry, 0, len(raw))
+	for _, entry := range raw {
+		e, _ := entry.(map[string]any)
+		name, _ := e["name"].(string)
+		sequence, _ := e["sequence"].(string)
+		out = append(out, service.SeriesEntry{Name: name, Sequence: sequence})
+	}
+	return &out
+}
+
+// The most series, and the most authors or narrators, a book may be given.
+const (
+	maxSeriesPerBook = 10
+	maxPeoplePerBook = 20
+)
+
 func updateItems(svc MetadataService) ServerTool {
 	return ServerTool{
 		Toolset: metaMetadata,
 		Tool: mcp.Tool{
 			Name:        "update_items",
-			Description: `Set the language and/or description of one or more books (up to 100, at most 10 descriptions per call). Fields left out are not touched; an empty string clears a field. Descriptions may use simple HTML: p, br, b, i, em, strong, del, ul, ol, li, and a with an http, https or mailto link; other markup, scripts, comments and invisible characters are removed before saving, and now shows what was stored. A description is at most 10,000 characters; a language is plain text, at most 64 characters, without markup, control or invisible characters. A value equal to what the book already has passes as it is. Show the user every change, per book from old to new, and get their confirmation before calling. For genres and tags use add_genres, remove_genres, add_tags and remove_tags. Returns each book's previous values; to undo, call again with them, except that a description comes back cleaned and a value these checks refuse can't be restored. Example items: [{"itemId":"li_1","language":"Russian"},{"itemId":"li_2","description":"<p>A blurb.</p>"}]`,
+			Description: `Set the language, description, series, authors and/or narrators of one or more books (up to 100, at most 10 descriptions per call). Fields left out are not touched; an empty string clears a language or description. series, authors and narrators replace the book's whole list, so send every entry the book should keep; an empty list removes them. Read the book's current lists with get_item and send them back with your change. series is a list of {name, sequence}, the sequence being the book's number as free text such as "1", "1.5" or "0", at most 16 characters, and may be left out; authors and narrators are lists of names. Names match regardless of case. Audiobookshelf creates a series or author that doesn't exist yet and deletes a series left with no books. Use the exact name of an existing series or author (search_library finds them); a misspelt name creates a new one. Audiobookshelf also deletes an author left with no books unless it has a photo, ASIN or description. Descriptions may use simple HTML: p, br, b, i, em, strong, del, ul, ol, li, and a with an http, https or mailto link; other markup, scripts, comments and invisible characters are removed before saving, and now shows what was stored. A description is at most 10,000 characters; a language, series name, author or narrator is plain text, at most 64 characters, without markup, control or invisible characters. A value equal to what the book already has passes as it is, in a list too. Show the user every change, per book from old to new, and get their confirmation before calling. For genres and tags use add_genres, remove_genres, add_tags and remove_tags. Returns each book's previous values; to undo, call again with them, except that a description comes back cleaned, a value these checks refuse can't be restored, and a series Audiobookshelf deleted comes back as a new one. Example items: [{"itemId":"li_1","language":"Russian"},{"itemId":"li_2","description":"<p>A blurb.</p>"},{"itemId":"li_3","series":[{"name":"Holly Gibney","sequence":"3"}],"authors":["Stephen King"],"narrators":["Will Patton"]}]`,
 			Annotations: destructiveWriteAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
@@ -260,9 +340,34 @@ func updateItems(svc MetadataService) ServerTool {
 						Items: &jsonschema.Schema{
 							Type: "object",
 							Properties: map[string]*jsonschema.Schema{
-								"itemId":      {Type: "string", Description: "Library item ID of the book (from find_items)"},
+								"itemId":      {Type: "string", Description: "Library item ID of the book (from find_items, search_library or get_series)"},
 								"language":    {Type: "string", Description: "New language, plain text, at most 64 characters; an empty string clears it"},
 								"description": {Type: "string", Description: "New description, simple HTML, at most 10,000 characters; an empty string clears it"},
+								"series": {
+									Type:        "array",
+									Description: "The book's series, replacing the ones it has, at most 10; [] removes the book from all of them",
+									MaxItems:    new(maxSeriesPerBook),
+									Items: &jsonschema.Schema{
+										Type: "object",
+										Properties: map[string]*jsonschema.Schema{
+											"name":     {Type: "string", Description: "Series name, plain text, at most 64 characters; matched regardless of case, created if it doesn't exist yet"},
+											"sequence": {Type: "string", Description: `The book's number in the series, such as "1", "1.5" or "0", plain text, at most 16 characters; leave it out for none`},
+										},
+										Required: []string{"name"},
+									},
+								},
+								"authors": {
+									Type:        "array",
+									Description: "The book's authors, replacing the ones it has, at most 20; each plain text, at most 64 characters, matched regardless of case, created if it doesn't exist yet; [] removes them all",
+									MaxItems:    new(maxPeoplePerBook),
+									Items:       &jsonschema.Schema{Type: "string"},
+								},
+								"narrators": {
+									Type:        "array",
+									Description: "The book's narrators, replacing the ones it has, at most 20; each plain text, at most 64 characters; [] removes them all",
+									MaxItems:    new(maxPeoplePerBook),
+									Items:       &jsonschema.Schema{Type: "string"},
+								},
 							},
 							Required: []string{"itemId"},
 						},

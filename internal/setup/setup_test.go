@@ -81,7 +81,7 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{
 		a:      &fakeAgent{id: "fake-a", name: "Fake A", detected: true},
 		b:      &fakeAgent{id: "fake-b", name: "Fake B", detected: true},
-		verify: &fakeVerify{acct: Account{Username: "artem", Libraries: 1, CanUpdate: true}},
+		verify: &fakeVerify{acct: Account{Username: "artem", Libraries: 1, CanUpdate: true, CanUpload: true}},
 	}
 	f.deps = Deps{
 		ConfigPath: filepath.Join(t.TempDir(), "audiobookshelf-mcp", "config.json"),
@@ -136,7 +136,7 @@ func TestRun_InteractiveHappyPath(t *testing.T) {
 	assert.Contains(t, out, "Audiobookshelf URL: ")
 	assert.Contains(t, out, "API token (Settings → Users → your user → API Token): ")
 	assert.Contains(t, out, "Connected to https://abs.example as artem, 1 library.")
-	assert.Contains(t, out, "Turn on the tools that edit your library (chapters, genres, tags, descriptions)? [y/N]: ")
+	assert.Contains(t, out, "Turn on the tools that edit your library (chapters, genres, tags, descriptions, series, covers)? [y/N]: ")
 	assert.Contains(t, out, "Saved settings to "+f.deps.ConfigPath+".")
 	assert.Contains(t, out, "  1. Fake A\n  2. Fake B\n")
 	assert.Contains(t, out, `Add audiobookshelf to all of these? Press Enter for all, or type numbers (e.g. 1,3), or "none": `)
@@ -343,8 +343,8 @@ func TestRun_ConnectedMessageCountsLibraries(t *testing.T) {
 }
 
 // editingOn is what answering y to the toolsets prompt saves: the default
-// toolsets and the editing ones, spelled out.
-var editingOn = []string{"libraries", "items", "playback", "chapters", "metadata"}
+// toolsets, browse and the editing ones, spelled out.
+var editingOn = []string{"libraries", "items", "playback", "browse", "chapters", "metadata", "covers"}
 
 func TestRun_ToolsetsPrompt(t *testing.T) {
 	tests := []struct {
@@ -363,6 +363,7 @@ func TestRun_ToolsetsPrompt(t *testing.T) {
 		{"editing list saved, n turns editing off", editingOn, "n", nil, "[Y/n]"},
 		{"chapters saved, Enter keeps them", []string{"chapters"}, "", []string{"chapters"}, "[Y/n]"},
 		{"metadata saved, Enter keeps them", []string{"metadata"}, "", []string{"metadata"}, "[Y/n]"},
+		{"covers saved, Enter keeps them", []string{"covers"}, "", []string{"covers"}, "[Y/n]"},
 		{"all saved, n turns editing off", []string{"all"}, "n", nil, "[Y/n]"},
 		{"all saved, no turns editing off", []string{"all"}, "no", nil, "[Y/n]"},
 		{"read-only saved, Enter keeps them", []string{"browse"}, "", []string{"browse"}, "[y/N]"},
@@ -376,7 +377,7 @@ func TestRun_ToolsetsPrompt(t *testing.T) {
 			out, err := f.run(t, tt.answer+"\nnone\n", Options{URL: testURL, Token: testToken})
 
 			require.NoError(t, err)
-			assert.Contains(t, out, "(chapters, genres, tags, descriptions)? "+tt.suffix+": ")
+			assert.Contains(t, out, "(chapters, genres, tags, descriptions, series, covers)? "+tt.suffix+": ")
 			assert.Equal(t, tt.want, f.saved(t).Toolsets)
 		})
 	}
@@ -440,6 +441,7 @@ func TestRun_WarnsWithoutUpdatePermission(t *testing.T) {
 		{"all, no permission", []string{"all"}, false, true},
 		{"chapters, no permission", []string{"chapters"}, false, true},
 		{"metadata, no permission", []string{"metadata"}, false, true},
+		{"covers, no permission", []string{"covers"}, false, true},
 		{"all, with permission", []string{"all"}, true, false},
 		{"editing off, no permission", nil, false, false},
 		{"read-only toolset, no permission", []string{"browse"}, false, false},
@@ -458,6 +460,43 @@ func TestRun_WarnsWithoutUpdatePermission(t *testing.T) {
 				assert.Contains(t, out, note)
 			} else {
 				assert.NotContains(t, out, "Update permission")
+			}
+		})
+	}
+}
+
+func TestRun_WarnsWithoutUploadPermission(t *testing.T) {
+	const note = "Note: artem has no Upload permission in Audiobookshelf, so set_cover will fail until an admin grants it."
+	tests := []struct {
+		name      string
+		toolsets  []string
+		canUpload bool
+		warns     bool
+	}{
+		{"covers, no permission", []string{"covers"}, false, true},
+		{"all, no permission", []string{"all"}, false, true},
+		{"covers among others, no permission", []string{"libraries", "chapters", "covers"}, false, true},
+		{"covers, with permission", []string{"covers"}, true, false},
+		{"all, with permission", []string{"all"}, true, false},
+		{"other editing toolsets, no permission", []string{"chapters", "metadata"}, false, false},
+		{"editing off, no permission", nil, false, false},
+		{"read-only toolset, no permission", []string{"browse"}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.verify.acct.CanUpload = tt.canUpload
+			opts := yes()
+			opts.ToolsetsSet, opts.Toolsets = true, tt.toolsets
+
+			out, err := f.run(t, "", opts)
+
+			require.NoError(t, err)
+			if tt.warns {
+				assert.Contains(t, out, note)
+				assert.NotContains(t, out, "Update permission", "the user may edit, only uploading is missing")
+			} else {
+				assert.NotContains(t, out, "Upload permission")
 			}
 		})
 	}
@@ -777,8 +816,9 @@ func TestRun_UnknownAgentIDFailsBeforeConnecting(t *testing.T) {
 }
 
 func TestVerifyWith_ShortensLongErrors(t *testing.T) {
-	page := "<!DOCTYPE html><html><body>" + strings.Repeat("<p>not found</p>", 128) + "</body></html>"
+	page := strings.Repeat("not found. ", 128)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusNotFound)
 		// Like a proxy that echoes the credentials back, with the token across
 		// the 300-byte cut: "checking the token: ABS API 404: " is 33 bytes and
@@ -792,10 +832,48 @@ func TestVerifyWith_ShortensLongErrors(t *testing.T) {
 	require.Error(t, err)
 	msg := err.Error()
 	assert.LessOrEqual(t, len(msg), 304)
-	assert.True(t, strings.HasPrefix(msg, "checking the token: ABS API 404: <!DOCTYPE html>"), msg)
+	assert.True(t, strings.HasPrefix(msg, "checking the token: ABS API 404: not found. "), msg)
 	assert.True(t, strings.HasSuffix(msg, "…"), msg)
 	assert.True(t, utf8.ValidString(msg))
 	assert.NotContains(t, msg, testToken[:5], "no part of the token survives the cut")
+}
+
+func TestVerifyWith_ReadsUpload(t *testing.T) {
+	tests := []struct {
+		name        string
+		permissions map[string]any
+		want        Account
+	}{
+		{
+			"update but no upload",
+			map[string]any{"update": true, "upload": false},
+			Account{Username: "artem", Libraries: 1, CanUpdate: true},
+		},
+		{
+			"upload but no update",
+			map[string]any{"update": false, "upload": true},
+			Account{Username: "artem", Libraries: 1, CanUpload: true},
+		},
+		{
+			"both",
+			map[string]any{"update": true, "upload": true},
+			Account{Username: "artem", Libraries: 1, CanUpdate: true, CanUpload: true},
+		},
+		{"neither", map[string]any{}, Account{Username: "artem", Libraries: 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := abstest.NewServer(t, map[string]any{
+				"/api/me":        map[string]any{"id": "u1", "username": "artem", "permissions": tt.permissions},
+				"/api/libraries": map[string]any{"libraries": []map[string]any{{"id": "lib1"}}},
+			})
+
+			got, err := VerifyWith(t.Context(), srv.URL, abstest.Token)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestVerifyWith(t *testing.T) {

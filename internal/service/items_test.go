@@ -17,8 +17,8 @@ func TestItems_Get_Book(t *testing.T) {
 	api.EXPECT().Item(mock.Anything, "item-1").Return(libraryItem("item-1", abs.MediaTypeBook, abs.BookMedia{
 		Metadata: abs.BookMetadata{
 			Title: "Katabasis", Subtitle: "A Novel", AuthorName: "R.F. Kuang",
-			NarratorName: "Billie Fulford-Brown", SeriesName: "Standalone",
-			Genres: []string{"Fantasy"}, Description: "A descent",
+			NarratorName: "Billie Fulford-Brown",
+			Genres:       []string{"Fantasy"}, Description: "A descent",
 			PublishedYear: "2025", Publisher: "Harper Voyager", Language: "English",
 		},
 		Duration: 43200,
@@ -31,13 +31,42 @@ func TestItems_Get_Book(t *testing.T) {
 		Item:          book("item-1", "Katabasis", "R.F. Kuang", 12*time.Hour),
 		Subtitle:      "A Novel",
 		Narrator:      "Billie Fulford-Brown",
-		SeriesName:    "Standalone",
+		Authors:       []string{},
+		Narrators:     []string{},
+		Series:        []SeriesEntry{},
 		Description:   "A descent",
 		PublishedYear: "2025",
 		Publisher:     "Harper Voyager",
 		Genres:        []string{"Fantasy"},
 		Language:      "English",
-	}, detail)
+	}, detail, "a book without authors, narrators or series has empty lists, never nil, so they can be sent straight back")
+}
+
+func TestItems_Get_BookLists(t *testing.T) {
+	api := NewMockItemsAPI(t)
+	api.EXPECT().Item(mock.Anything, "item-1").Return(libraryItem("item-1", abs.MediaTypeBook, abs.BookMedia{
+		Metadata: abs.BookMetadata{
+			Title: "Joyland", AuthorName: "Stephen King, Richard Bachman", NarratorName: "Michael Kelly, Will Patton",
+			SeriesName: "Hard Case Crime #1, Holly Gibney",
+			Authors:    []abs.AuthorRef{{ID: "au_1", Name: "Stephen King"}, {ID: "au_2", Name: "Richard Bachman"}},
+			Narrators:  []string{"Michael Kelly", "Will Patton"},
+			Series: abs.FlexSeries{
+				{ID: "se_1", Name: "Hard Case Crime", Sequence: "1"},
+				{ID: "se_2", Name: "Holly Gibney"},
+			},
+		},
+		Duration: 36000,
+	}), nil)
+
+	detail, err := NewItems(api).Get(context.Background(), "item-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Stephen King", "Richard Bachman"}, detail.Authors, "names only, in the book's order")
+	assert.Equal(t, []string{"Michael Kelly", "Will Patton"}, detail.Narrators)
+	assert.Equal(t, []SeriesEntry{{Name: "Hard Case Crime", Sequence: "1"}, {Name: "Holly Gibney"}}, detail.Series,
+		"the shape update_items takes: no ids, and no sequence for a book with no number")
+	assert.Equal(t, "Stephen King, Richard Bachman", detail.Author, "the display strings stay")
+	assert.Equal(t, "Michael Kelly, Will Patton", detail.Narrator)
 }
 
 func TestItems_Get_Podcast(t *testing.T) {
@@ -58,7 +87,7 @@ func TestItems_Get_Podcast(t *testing.T) {
 		Language:    "en",
 		Tags:        []string{"history"},
 		NumEpisodes: 68,
-	}, detail)
+	}, detail, "a podcast has no authors, narrators or series lists, not even empty ones")
 }
 
 func TestItems_Get_ReturnsAPIErrorUnchanged(t *testing.T) {

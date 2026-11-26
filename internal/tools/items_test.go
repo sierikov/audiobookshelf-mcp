@@ -1,11 +1,14 @@
 package tools
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/sierikov/audiobookshelf-mcp/internal/service"
 )
@@ -16,7 +19,9 @@ func TestGetItem_Book(t *testing.T) {
 		Item:          book("item-1", "Katabasis", "R.F. Kuang", 12*time.Hour),
 		Subtitle:      "A Novel",
 		Narrator:      "Billie Fulford-Brown",
-		SeriesName:    "Standalone",
+		Authors:       []string{"R.F. Kuang"},
+		Narrators:     []string{"Billie Fulford-Brown"},
+		Series:        []service.SeriesEntry{{Name: "Standalone"}},
 		Description:   "A descent",
 		PublishedYear: "2025",
 		Publisher:     "Harper Voyager",
@@ -29,9 +34,62 @@ func TestGetItem_Book(t *testing.T) {
 
 	assertJSON(t, `{
 		"id":"item-1","mediaType":"book","title":"Katabasis","subtitle":"A Novel",
-		"author":"R.F. Kuang","narrator":"Billie Fulford-Brown","seriesName":"Standalone",
+		"author":"R.F. Kuang","narrator":"Billie Fulford-Brown",
+		"authors":["R.F. Kuang"],"narrators":["Billie Fulford-Brown"],"series":[{"name":"Standalone"}],
 		"description":"A descent","duration":"12h 0m","publishedYear":"2025",
 		"publisher":"Harper Voyager","genres":["Fantasy","Fiction"],"tags":["horror"],"language":"English"
+	}`, result)
+	assert.NotContains(t, resultText(result), "seriesName")
+}
+
+func TestGetItem_BookListsAreTheShapeUpdateItemsTakes(t *testing.T) {
+	svc := NewMockItemService(t)
+	svc.EXPECT().Get(mock.Anything, "item-1").Return(service.ItemDetail{
+		Item:      book("item-1", "Joyland", "Stephen King, Richard Bachman", 10*time.Hour),
+		Narrator:  "Michael Kelly, Will Patton",
+		Authors:   []string{"Stephen King", "Richard Bachman"},
+		Narrators: []string{"Michael Kelly", "Will Patton"},
+		Series:    []service.SeriesEntry{{Name: "Hard Case Crime", Sequence: "1"}, {Name: "Holly Gibney"}},
+	}, nil)
+
+	result := call(t, ItemTools(svc), "get_item", map[string]any{"itemId": "item-1"})
+
+	assertJSON(t, `{
+		"id":"item-1","mediaType":"book","title":"Joyland",
+		"author":"Stephen King, Richard Bachman","narrator":"Michael Kelly, Will Patton",
+		"authors":["Stephen King","Richard Bachman"],"narrators":["Michael Kelly","Will Patton"],
+		"series":[{"name":"Hard Case Crime","sequence":"1"},{"name":"Holly Gibney"}],
+		"duration":"10h 0m"
+	}`, result)
+
+	// Sent straight back, the lists pass update_items' schema as they are.
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(resultText(result)), &got))
+	item := map[string]any{"itemId": "item-1"}
+	for _, field := range []string{"authors", "narrators", "series"} {
+		item[field] = got[field]
+	}
+	updateItems := findTool(MetadataTools(NewMockMetadataService(t)), "update_items")
+	require.NotNil(t, updateItems)
+	resolved, err := inputSchema(&updateItems.Tool)
+	require.NoError(t, err)
+	require.NoError(t, resolved.Validate(map[string]any{"items": []any{item}}))
+}
+
+func TestGetItem_BookWithoutListsShowsEmptyLists(t *testing.T) {
+	svc := NewMockItemService(t)
+	svc.EXPECT().Get(mock.Anything, "item-1").Return(service.ItemDetail{
+		Item:      book("item-1", "Anonymous", "", time.Hour),
+		Authors:   []string{},
+		Narrators: []string{},
+		Series:    []service.SeriesEntry{},
+	}, nil)
+
+	result := call(t, ItemTools(svc), "get_item", map[string]any{"itemId": "item-1"})
+
+	assertJSON(t, `{
+		"id":"item-1","mediaType":"book","title":"Anonymous","duration":"1h 0m",
+		"authors":[],"narrators":[],"series":[]
 	}`, result)
 }
 
@@ -45,6 +103,9 @@ func TestGetItem_PodcastHasNoDuration(t *testing.T) {
 	result := call(t, ItemTools(svc), "get_item", map[string]any{"itemId": "pod-1"})
 
 	assertJSON(t, `{"id":"pod-1","mediaType":"podcast","title":"Hardcore History","author":"Dan Carlin","numEpisodes":68}`, result)
+	for _, field := range []string{`"authors"`, `"narrators"`, `"series"`} {
+		assert.NotContains(t, resultText(result), field, "a podcast has no such lists")
+	}
 }
 
 func TestGetItem_MissingItemID(t *testing.T) {

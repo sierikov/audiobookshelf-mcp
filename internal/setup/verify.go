@@ -31,6 +31,7 @@ func VerifyWith(ctx context.Context, url, token string) (Account, error) {
 		Username:  user.Username,
 		Libraries: len(libs),
 		CanUpdate: user.Permissions.Update,
+		CanUpload: user.Permissions.Upload,
 	}, nil
 }
 

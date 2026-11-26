@@ -143,6 +143,7 @@ func serve(ctx context.Context) error {
 		Browse:    service.NewBrowse(client),
 		Chapters:  service.NewChapters(client),
 		Metadata:  service.NewMetadata(client),
+		Covers:    service.NewCovers(client, service.NewImageFetcher()),
 	}, tools.Options{Version: ver, Toolsets: cfg.Toolsets, Instructions: updateInstructions(checker)})
 
 	if checker != nil {
@@ -237,7 +238,7 @@ func parseSetupFlags(flags *flag.FlagSet, args []string) (setup.Options, error) 
 		"API `token`; other programs on this machine can see it in the process list, so the prompt is safer")
 	flags.StringVar(&toolsets, "toolsets", "",
 		"toolsets to use, as a comma-separated `list`. It replaces the defaults (libraries,items,playback): "+
-			"for example libraries,items,playback,chapters,metadata, or all. An empty value restores the defaults.")
+			"for example libraries,items,playback,browse,chapters,metadata,covers, or all. An empty value restores the defaults.")
 	flags.StringVar(&agentIDs, "agents", "",
 		"agents to add this server to, as a comma-separated `list` of IDs, or none")
 	flags.BoolVar(&opts.Yes, "yes", false, "never ask: use the flags, the saved settings and the defaults")

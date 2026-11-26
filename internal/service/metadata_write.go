@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -157,22 +158,25 @@ func caseConflict(existing string, adding []string) string {
 	return fmt.Sprintf("already has %q; remove it before adding %q", existing, adding[i])
 }
 
-// Update sets the language and/or description of books.
+// Update sets the language, description, series, authors and/or narrators of
+// books.
 //
 // Before any call it checks the changes: 1 to [MaxItemsPerCall] of them
 // ([ErrNoItems], [ErrTooManyItems]); ids non-empty and unique after
 // trimming (an [*ItemError]); at most [MaxDescriptionsPerCall] setting a
 // description ([ErrTooManyDescriptions]); and each setting at least one
-// field (an [*ItemError]). Ids, languages and descriptions are trimmed.
+// field (an [*ItemError]). Ids, languages, descriptions and the names and
+// sequences of the lists are trimmed.
 //
 // One call reads every book for Previous, which holds only the fields being
-// set, as stored: a null reads as "" and a description is its HTML. An
-// unknown id is an [ErrUnknownItems] error and an item that is not a book
-// an [ErrBooksOnly] one. New values are then checked as [checkFields] says.
-// One call sends only the fields given; an empty string clears a field.
-// Changed is Audiobookshelf's count of books that changed. A second read
-// gives Now, with the same fields as Previous. Items has every book in the
-// order given.
+// set, as stored: a null reads as "" or as an empty list and a description is
+// its HTML. An unknown id is an [ErrUnknownItems] error and an item that is
+// not a book an [ErrBooksOnly] one. New values are then checked as
+// [checkFields] says. One call sends only the fields given; an empty string
+// clears a language or description, and a list replaces the book's whole
+// list, an empty one removing it. Changed is Audiobookshelf's count of books
+// that changed. A second read gives Now, with the same fields as Previous.
+// Items has every book in the order given.
 //
 // If the save fails, Now is empty, Previous is kept, and the error wraps
 // [ErrWriteIncomplete] and the API error. If only the second read fails,
@@ -198,9 +202,7 @@ func (s *Metadata) Update(ctx context.Context, changes []ItemChange) (UpdateResu
 	updates := make([]abs.ItemUpdate, len(changes))
 	for i, c := range changes {
 		res.Items[i] = ItemUpdateResult{ItemID: c.ItemID, Title: before[i].Metadata.Title, Previous: storedFields(before[i], c)}
-		updates[i] = abs.ItemUpdate{ID: c.ItemID, MediaPayload: abs.MediaPayload{
-			Metadata: &abs.MetadataPayload{Language: c.Language, Description: c.Description},
-		}}
+		updates[i] = abs.ItemUpdate{ID: c.ItemID, MediaPayload: abs.MediaPayload{Metadata: metadataPayload(c)}}
 	}
 	n, err := s.api.UpdateItems(ctx, updates)
 	if err != nil {
@@ -237,10 +239,13 @@ func checkChanges(changes []ItemChange) ([]ItemChange, []string, error) {
 	}
 	out := make([]ItemChange, len(changes))
 	for i, c := range changes {
-		if c.Language == nil && c.Description == nil {
-			return nil, nil, &ItemError{Position: i + 1, ItemID: ids[i], Reason: "sets neither language nor description"}
+		if c.setsNothing() {
+			return nil, nil, &ItemError{Position: i + 1, ItemID: ids[i], Reason: "sets none of language, description, series, authors, narrators"}
 		}
-		out[i] = ItemChange{ItemID: ids[i], Language: trimmed(c.Language), Description: trimmed(c.Description)}
+		out[i] = ItemChange{
+			ItemID: ids[i], Language: trimmed(c.Language), Description: trimmed(c.Description),
+			Series: mapPtr(c.Series, trimmedEntry), Authors: mapPtr(c.Authors, strings.TrimSpace), Narrators: mapPtr(c.Narrators, strings.TrimSpace),
+		}
 	}
 	return out, ids, nil
 }
@@ -255,11 +260,12 @@ func trimmed(s *string) *string {
 }
 
 // checkFields checks the fields c sets on book b, the change at position
-// pos, and returns c with its description cleaned. An empty string, which
-// clears, and a value equal to the stored one, both trimmed, pass untouched.
-// A new language must pass [checkPlain]; a new description must be at most
-// [MaxDescriptionLength] characters and keep some text through [cleanHTML].
-// A failure is an [*ItemError].
+// pos, and returns c with its description cleaned. c is trimmed, as
+// [checkChanges] returns it. An empty string, which clears, and a value equal
+// to the stored one, both trimmed, pass untouched. A new language must pass
+// [checkPlain]; a new description must be at most [MaxDescriptionLength]
+// characters and keep some text through [cleanHTML]; the lists must pass
+// [checkLists]. A failure is an [*ItemError].
 func checkFields(c ItemChange, b *abs.BookMedia, pos int) (ItemChange, error) {
 	if isNew(c.Language, b.Metadata.Language) {
 		if reason := checkPlain(*c.Language, MaxValueLength); reason != "" {
@@ -273,7 +279,15 @@ func checkFields(c ItemChange, b *abs.BookMedia, pos int) (ItemChange, error) {
 		}
 		c.Description = &cleaned
 	}
+	if reason := checkLists(c, b.Metadata); reason != "" {
+		return c, &ItemError{Position: pos, ItemID: c.ItemID, Reason: reason}
+	}
 	return c, nil
+}
+
+// setsNothing reports whether c sets none of the fields a change can set.
+func (c ItemChange) setsNothing() bool {
+	return c.Language == nil && c.Description == nil && c.Series == nil && c.Authors == nil && c.Narrators == nil
 }
 
 // isNew reports whether v sets a value that is neither empty nor, trimmed,
@@ -295,8 +309,147 @@ func cleanDescription(s string) (cleaned, reason string) {
 	return cleaned, ""
 }
 
+// checkLists returns why the series, authors and narrators c sets on a book
+// with metadata m are refused, or "". See [checkNames] and [checkSeries].
+func checkLists(c ItemChange, m abs.BookMetadata) string {
+	return cmp.Or(
+		checkSeries(c.Series, storedSeries(m)),
+		checkNames("author", c.Authors, storedAuthors(m)),
+		checkNames("narrator", c.Narrators, m.Narrators),
+	)
+}
+
+// checkNames returns why the names a change sets, as the noun they are
+// ("author"), are refused, or "". A nil list, or one equal to stored, passes
+// untouched, stored being compared without the spaces around its values.
+// Otherwise a name must not be empty, nor repeat another ignoring case, and
+// each one stored does not hold must pass [checkPlain] with [MaxValueLength].
+func checkNames(noun string, names *[]string, stored []string) string {
+	if names == nil || slices.EqualFunc(*names, stored, func(n, s string) bool { return n == strings.TrimSpace(s) }) {
+		return ""
+	}
+	if reason := checkShape(noun, *names); reason != "" {
+		return reason
+	}
+	for _, n := range *names {
+		if hasValue(stored, n) {
+			continue
+		}
+		if reason := badValue(noun, n, MaxValueLength); reason != "" {
+			return reason
+		}
+	}
+	return ""
+}
+
+// checkSeries returns why a series list a change sets is refused, or "". A
+// nil list, or one equal to stored, passes untouched. Otherwise a name must
+// not be empty, nor repeat another ignoring case, and each entry must pass
+// [checkEntry].
+func checkSeries(list *[]SeriesEntry, stored []SeriesEntry) string {
+	if list == nil || slices.EqualFunc(*list, stored, sameEntry) {
+		return ""
+	}
+	if reason := checkShape("series", mapList(*list, func(e SeriesEntry) string { return e.Name })); reason != "" {
+		return reason
+	}
+	for _, e := range *list {
+		if reason := checkEntry(e, stored); reason != "" {
+			return reason
+		}
+	}
+	return ""
+}
+
+// checkEntry returns why a series entry, a trimmed one, is refused, or "". An
+// entry that is stored, a name that is, and an empty sequence pass untouched;
+// a new name must pass [checkPlain] with [MaxValueLength] and a new sequence
+// with [MaxSequenceLength].
+func checkEntry(e SeriesEntry, stored []SeriesEntry) string {
+	if slices.ContainsFunc(stored, func(s SeriesEntry) bool { return sameEntry(e, s) }) {
+		return ""
+	}
+	var name, sequence string
+	if !slices.ContainsFunc(stored, func(s SeriesEntry) bool { return e.Name == strings.TrimSpace(s.Name) }) {
+		name = badValue("series name", e.Name, MaxValueLength)
+	}
+	if e.Sequence != "" {
+		sequence = badValue("series sequence", e.Sequence, MaxSequenceLength)
+	}
+	return cmp.Or(name, sequence)
+}
+
+// sameEntry reports whether the entry e, a trimmed one, is the stored entry s,
+// whose name and sequence are compared without surrounding spaces.
+func sameEntry(e, s SeriesEntry) bool {
+	return e.Name == strings.TrimSpace(s.Name) && e.Sequence == strings.TrimSpace(s.Sequence)
+}
+
+// checkShape returns why the trimmed names of a list of the noun are refused,
+// or "": one is empty, or one repeats an earlier one, which includes an exact
+// repeat, ignoring case. Positions are 1-based.
+func checkShape(noun string, names []string) string {
+	for j, n := range names {
+		if n == "" {
+			return fmt.Sprintf("%s %d has no name", noun, j+1)
+		}
+		if i := slices.IndexFunc(names[:j], func(earlier string) bool { return strings.EqualFold(earlier, n) }); i >= 0 {
+			return fmt.Sprintf("%s %d (%s) repeats %s %d (%s), ignoring case", noun, j+1, quoted(n), noun, i+1, quoted(names[i]))
+		}
+	}
+	return ""
+}
+
+// badValue returns why [checkPlain] refuses v with a limit, as a reason that
+// says what v is, or "" for a good value.
+func badValue(what, v string, limit int) string {
+	reason := checkPlain(v, limit)
+	if reason == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s (%s) %s", what, quoted(v), reason)
+}
+
+// trimmedEntry returns e without the spaces around its name and sequence.
+func trimmedEntry(e SeriesEntry) SeriesEntry {
+	return SeriesEntry{Name: strings.TrimSpace(e.Name), Sequence: strings.TrimSpace(e.Sequence)}
+}
+
+// storedSeries returns the book's series as stored, never nil.
+func storedSeries(m abs.BookMetadata) []SeriesEntry {
+	return mapList(m.Series, func(r abs.SeriesRef) SeriesEntry { return SeriesEntry{Name: r.Name, Sequence: r.Sequence} })
+}
+
+// storedAuthors returns the names of the book's authors as stored, never nil.
+func storedAuthors(m abs.BookMetadata) []string {
+	return mapList(m.Authors, func(a abs.AuthorRef) string { return a.Name })
+}
+
+// storedNarrators returns the book's narrators as stored, never nil.
+func storedNarrators(m abs.BookMetadata) []string {
+	return append([]string{}, m.Narrators...)
+}
+
+// mapList returns f of each element of list, as a list that is never nil.
+func mapList[T, U any](list []T, f func(T) U) []U {
+	out := make([]U, len(list))
+	for i, v := range list {
+		out[i] = f(v)
+	}
+	return out
+}
+
+// mapPtr is [mapList] for a list a change may leave out: nil stays nil, and
+// the result of anything else is never a pointer to nil.
+func mapPtr[T, U any](list *[]T, f func(T) U) *[]U {
+	if list == nil {
+		return nil
+	}
+	return new(mapList(*list, f))
+}
+
 // storedFields returns the book's stored values for the fields c sets. A
-// null reads as ""; a description is its HTML.
+// null reads as "" or as an empty list; a description is its HTML.
 func storedFields(b *abs.BookMedia, c ItemChange) ItemFields {
 	var f ItemFields
 	if c.Language != nil {
@@ -305,7 +458,29 @@ func storedFields(b *abs.BookMedia, c ItemChange) ItemFields {
 	if c.Description != nil {
 		f.Description = new(b.Metadata.Description)
 	}
+	if c.Series != nil {
+		f.Series = new(storedSeries(b.Metadata))
+	}
+	if c.Authors != nil {
+		f.Authors = new(storedAuthors(b.Metadata))
+	}
+	if c.Narrators != nil {
+		f.Narrators = new(storedNarrators(b.Metadata))
+	}
 	return f
+}
+
+// metadataPayload is the update that sends the fields c sets and no others.
+// Series and authors go by name: Audiobookshelf finds each one regardless of
+// case, or creates it.
+func metadataPayload(c ItemChange) *abs.MetadataPayload {
+	return &abs.MetadataPayload{
+		Language:    c.Language,
+		Description: c.Description,
+		Series:      mapPtr(c.Series, func(e SeriesEntry) abs.SeriesRef { return abs.SeriesRef{Name: e.Name, Sequence: e.Sequence} }),
+		Authors:     mapPtr(c.Authors, func(name string) abs.AuthorRef { return abs.AuthorRef{Name: name} }),
+		Narrators:   c.Narrators,
+	}
 }
 
 // readBooks reads books by id in one call and decodes them, in the order of

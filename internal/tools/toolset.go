@@ -21,6 +21,7 @@ const (
 	toolsetBrowse    ToolsetID = "browse"
 	toolsetChapters  ToolsetID = "chapters"
 	toolsetMetadata  ToolsetID = "metadata"
+	toolsetCovers    ToolsetID = "covers"
 )
 
 // ToolsetMeta describes a toolset.
@@ -37,11 +38,12 @@ var (
 	metaBrowse    = ToolsetMeta{toolsetBrowse, "Browse series, authors, collections", false}
 	metaChapters  = ToolsetMeta{toolsetChapters, "Find, fix and save audiobook chapters (includes writes)", false}
 	metaMetadata  = ToolsetMeta{toolsetMetadata, "Survey and fix genres, tags, language and descriptions (includes writes)", false}
+	metaCovers    = ToolsetMeta{toolsetCovers, "Find and set book covers (includes writes)", false}
 )
 
 // AllToolsetMetas returns all defined toolset metadata.
 func AllToolsetMetas() []ToolsetMeta {
-	return []ToolsetMeta{metaLibraries, metaItems, metaPlayback, metaBrowse, metaChapters, metaMetadata}
+	return []ToolsetMeta{metaLibraries, metaItems, metaPlayback, metaBrowse, metaChapters, metaMetadata, metaCovers}
 }
 
 // DefaultToolsets returns the set of toolsets enabled by default.

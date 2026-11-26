@@ -31,7 +31,7 @@ const noAgents = "none"
 
 // editingToolsets are the toolsets that write to the library. "all" includes
 // them.
-var editingToolsets = []string{"all", "chapters", "metadata"}
+var editingToolsets = []string{"all", "chapters", "metadata", "covers"}
 
 // errInputEnded is the error when the input runs out before every question is
 // answered. Running out is not the same as pressing Enter: only --yes takes
@@ -47,6 +47,9 @@ type Account struct {
 	Libraries int
 	// CanUpdate reports whether the user may edit library items.
 	CanUpdate bool
+	// CanUpload reports whether the user may upload files, which set_cover
+	// needs, besides CanUpdate, to replace a cover.
+	CanUpload bool
 }
 
 // Options are the command-line choices that decide which questions Run asks.
@@ -107,6 +110,7 @@ func Run(ctx context.Context, in io.Reader, out io.Writer, opts Options, deps De
 		return err
 	}
 	s.warnWithoutUpdate(acct, cfg.Toolsets)
+	s.warnWithoutUpload(acct, cfg.Toolsets)
 
 	if err := config.Save(deps.ConfigPath, cfg); err != nil {
 		return err
@@ -274,7 +278,7 @@ func (s *session) askToolsets(saved []string) ([]string, error) {
 	if editsLibrary(saved) {
 		choices = "[Y/n]"
 	}
-	answer, err := s.ask("Turn on the tools that edit your library (chapters, genres, tags, descriptions)? " + choices + ": ")
+	answer, err := s.ask("Turn on the tools that edit your library (chapters, genres, tags, descriptions, series, covers)? " + choices + ": ")
 	if err != nil {
 		return nil, err
 	}
@@ -282,9 +286,10 @@ func (s *session) askToolsets(saved []string) ([]string, error) {
 	case "":
 		return saved, nil
 	case "y", "yes":
-		// These are the server's toolset IDs, with the editing ones on; setup
-		// cannot import the tools package to ask for them.
-		return []string{"libraries", "items", "playback", "chapters", "metadata"}, nil
+		// These are the server's toolset IDs, with the editing ones on, and
+		// browse, which finds the series and authors they work on; setup cannot
+		// import the tools package to ask for them.
+		return []string{"libraries", "items", "playback", "browse", "chapters", "metadata", "covers"}, nil
 	case "n", "no":
 		return nil, nil
 	default:
@@ -320,6 +325,14 @@ func (s *session) warnXDGConfigHome() {
 func (s *session) warnWithoutUpdate(acct Account, toolsets []string) {
 	if editsLibrary(toolsets) && !acct.CanUpdate {
 		s.printf("Note: %s has no Update permission in Audiobookshelf, so the editing tools will fail until an admin grants it.\n", acct.Username)
+	}
+}
+
+// warnWithoutUpload says so when set_cover is on but the user may not upload
+// files to Audiobookshelf. "all" turns set_cover on too.
+func (s *session) warnWithoutUpload(acct Account, toolsets []string) {
+	if (slices.Contains(toolsets, "covers") || slices.Contains(toolsets, "all")) && !acct.CanUpload {
+		s.printf("Note: %s has no Upload permission in Audiobookshelf, so set_cover will fail until an admin grants it.\n", acct.Username)
 	}
 }
 

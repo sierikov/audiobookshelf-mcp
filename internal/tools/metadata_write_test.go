@@ -245,3 +245,187 @@ func TestUpdateItems_Errors(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateItems_Lists(t *testing.T) {
+	svc := NewMockMetadataService(t)
+	svc.EXPECT().Update(mock.Anything, []service.ItemChange{
+		{
+			ItemID:    "li_1",
+			Series:    new([]service.SeriesEntry{{Name: "Holly Gibney", Sequence: "3"}, {Name: "Bill Hodges"}}),
+			Authors:   new([]string{"Stephen King"}),
+			Narrators: new([]string{"Will Patton"}),
+		},
+		{ItemID: "li_2", Series: new([]service.SeriesEntry{}), Authors: new([]string{}), Narrators: new([]string{})},
+		{ItemID: "li_3", Language: new("English")},
+	}).Return(service.UpdateResult{
+		Changed: 3,
+		Items: []service.ItemUpdateResult{
+			{
+				ItemID: "li_1", Title: "Holly",
+				Previous: service.ItemFields{
+					Series:    new([]service.SeriesEntry{{Name: "Holly Gibney", Sequence: "3"}}),
+					Authors:   new([]string{"Stephen King"}),
+					Narrators: nil,
+				},
+				Now: service.ItemFields{
+					Series:    new([]service.SeriesEntry{{Name: "Holly Gibney", Sequence: "3"}, {Name: "Bill Hodges"}}),
+					Authors:   new([]string{"Stephen King"}),
+					Narrators: new([]string{"Will Patton"}),
+				},
+			},
+			{
+				ItemID: "li_2", Title: "Emma",
+				Previous: service.ItemFields{
+					Series:    new([]service.SeriesEntry{{Name: "Cycle", Sequence: "1.5"}}),
+					Authors:   new([]string{"Jane Austen"}),
+					Narrators: new([]string{"Juliet Stevenson"}),
+				},
+				Now: service.ItemFields{Series: new([]service.SeriesEntry{}), Authors: new([]string{}), Narrators: new([]string{})},
+			},
+			{ItemID: "li_3", Title: "Dune", Previous: service.ItemFields{Language: new("")}, Now: service.ItemFields{Language: new("English")}},
+		},
+	}, nil)
+
+	result := call(t, MetadataTools(svc), "update_items", map[string]any{"items": []any{
+		map[string]any{
+			"itemId":    "li_1",
+			"series":    []any{map[string]any{"name": "Holly Gibney", "sequence": "3"}, map[string]any{"name": "Bill Hodges"}},
+			"authors":   []any{"Stephen King"},
+			"narrators": []any{"Will Patton"},
+		},
+		map[string]any{"itemId": "li_2", "series": []any{}, "authors": []any{}, "narrators": []any{}},
+		map[string]any{"itemId": "li_3", "language": "English"},
+	}})
+
+	// A list that was asked about always shows, as [] when empty; one that
+	// was not asked about is left out. Previous and now fit straight back in.
+	assertJSON(t, `{
+		"changed":3,
+		"items":[
+			{
+				"itemId":"li_1","title":"Holly",
+				"previous":{"series":[{"name":"Holly Gibney","sequence":"3"}],"authors":["Stephen King"]},
+				"now":{"series":[{"name":"Holly Gibney","sequence":"3"},{"name":"Bill Hodges"}],"authors":["Stephen King"],"narrators":["Will Patton"]}
+			},
+			{
+				"itemId":"li_2","title":"Emma",
+				"previous":{"series":[{"name":"Cycle","sequence":"1.5"}],"authors":["Jane Austen"],"narrators":["Juliet Stevenson"]},
+				"now":{"series":[],"authors":[],"narrators":[]}
+			},
+			{"itemId":"li_3","title":"Dune","previous":{"language":""},"now":{"language":"English"}}
+		]
+	}`, result)
+}
+
+func TestUpdateItems_ListsWriteIncomplete(t *testing.T) {
+	svc := NewMockMetadataService(t)
+	svc.EXPECT().Update(mock.Anything, []service.ItemChange{{ItemID: "li_1", Series: new([]service.SeriesEntry{})}}).
+		Return(service.UpdateResult{Items: []service.ItemUpdateResult{{
+			ItemID: "li_1", Title: "Holly",
+			Previous: service.ItemFields{Series: new([]service.SeriesEntry{{Name: "Holly Gibney", Sequence: "3"}})},
+		}}}, fmt.Errorf("%w: %w", service.ErrWriteIncomplete, errBoom))
+
+	result := call(t, MetadataTools(svc), "update_items", map[string]any{"items": []any{
+		map[string]any{"itemId": "li_1", "series": []any{}},
+	}})
+
+	require.True(t, result.IsError)
+	text := resultText(result)
+	prefix := "failed to update items: the write failed; some books may already be saved: ABS API 500: boom; previous values: "
+	require.True(t, strings.HasPrefix(text, prefix), text)
+	assert.JSONEq(t, `[{"itemId":"li_1","title":"Holly","previous":{"series":[{"name":"Holly Gibney","sequence":"3"}]}}]`,
+		strings.TrimPrefix(text, prefix))
+}
+
+func TestUpdateItems_SeriesSchema(t *testing.T) {
+	item := schemaOf(t, "update_items").Properties["items"].Items
+
+	series := item.Properties["series"]
+	require.NotNil(t, series)
+	assert.Equal(t, "array", series.Type)
+	assert.Equal(t, new(10), series.MaxItems)
+	assert.Equal(t, "object", series.Items.Type)
+	assert.Equal(t, []string{"name"}, series.Items.Required)
+	assert.Equal(t, "string", series.Items.Properties["name"].Type)
+	assert.Equal(t, "string", series.Items.Properties["sequence"].Type)
+	for _, name := range []string{"authors", "narrators"} {
+		list := item.Properties[name]
+		require.NotNil(t, list, name)
+		assert.Equal(t, "array", list.Type, name)
+		assert.Equal(t, "string", list.Items.Type, name)
+		assert.Equal(t, new(20), list.MaxItems, name)
+	}
+
+	// A value equal to the stored one passes at any length, so the limits are
+	// in the service and the text, not the schema.
+	assert.Nil(t, series.Items.Properties["name"].MaxLength)
+	assert.Contains(t, series.Items.Properties["name"].Description, "64 characters")
+	assert.Nil(t, series.Items.Properties["sequence"].MaxLength)
+	assert.Contains(t, series.Items.Properties["sequence"].Description, "16 characters")
+	assert.Nil(t, item.Properties["authors"].Items.MaxLength)
+	assert.Contains(t, item.Properties["authors"].Description, "64 characters")
+	assert.Nil(t, item.Properties["narrators"].Items.MaxLength)
+	assert.Contains(t, item.Properties["narrators"].Description, "64 characters")
+}
+
+func TestUpdateItems_SchemaChecksLists(t *testing.T) {
+	st := findTool(AllTools(Services{}), "update_items")
+	require.NotNil(t, st)
+	resolved, err := inputSchema(&st.Tool)
+	require.NoError(t, err)
+	item := func(field string, value any) map[string]any {
+		return map[string]any{"items": []any{map[string]any{"itemId": "li_1", field: value}}}
+	}
+	repeat := func(n int, v any) []any {
+		out := make([]any, n)
+		for i := range out {
+			out[i] = v
+		}
+		return out
+	}
+	long := strings.Repeat("a", 100)
+
+	require.NoError(t, resolved.Validate(item("series", []any{map[string]any{"name": "Holly Gibney", "sequence": "3"}})))
+	require.NoError(t, resolved.Validate(item("series", []any{map[string]any{"name": "Holly Gibney"}})))
+	require.NoError(t, resolved.Validate(item("series", []any{})), "an empty list removes the series")
+	require.NoError(t, resolved.Validate(item("authors", []any{})))
+	require.NoError(t, resolved.Validate(item("narrators", []any{})))
+	require.NoError(t, resolved.Validate(item("series", repeat(10, map[string]any{"name": "S"}))))
+	require.NoError(t, resolved.Validate(item("authors", repeat(20, "A"))))
+	require.NoError(t, resolved.Validate(item("narrators", repeat(20, "N"))))
+	require.NoError(t, resolved.Validate(item("authors", []any{long})), "a stored value sent back unchanged is for the service to judge")
+	require.NoError(t, resolved.Validate(item("series", []any{map[string]any{"name": long, "sequence": long}})))
+
+	require.Error(t, resolved.Validate(item("series", []any{map[string]any{"sequence": "3"}})), "a series needs a name")
+	require.Error(t, resolved.Validate(item("series", []any{map[string]any{"name": "S", "bogus": 1}})))
+	require.Error(t, resolved.Validate(item("series", []any{"Holly Gibney"})))
+	require.Error(t, resolved.Validate(item("series", repeat(11, map[string]any{"name": "S"}))))
+	require.Error(t, resolved.Validate(item("authors", repeat(21, "A"))))
+	require.Error(t, resolved.Validate(item("narrators", repeat(21, "N"))))
+	require.Error(t, resolved.Validate(item("authors", []any{1})))
+}
+
+func TestUpdateItems_DescriptionWarnsAboutLists(t *testing.T) {
+	st := findTool(MetadataTools(NewMockMetadataService(t)), "update_items")
+	require.NotNil(t, st)
+
+	for _, want := range []string{
+		"series, authors and narrators replace the book's whole list",
+		"an empty list removes them",
+		"Audiobookshelf creates a series or author that doesn't exist yet and deletes a series left with no books",
+		"Names match regardless of case",
+		"Use the exact name of an existing series or author (search_library finds them); a misspelt name creates a new one",
+		"Audiobookshelf also deletes an author left with no books unless it has a photo, ASIN or description",
+		"Read the book's current lists with get_item and send them back with your change",
+		"to undo, call again with them",
+	} {
+		assert.Contains(t, st.Tool.Description, want)
+	}
+}
+
+func TestUpdateItems_ItemIDSaysWhereToFindIt(t *testing.T) {
+	itemID := schemaOf(t, "update_items").Properties["items"].Items.Properties["itemId"]
+	require.NotNil(t, itemID)
+
+	assert.Contains(t, itemID.Description, "(from find_items, search_library or get_series)")
+}

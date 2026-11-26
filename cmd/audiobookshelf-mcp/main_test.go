@@ -260,6 +260,7 @@ func TestRun_SetupHelp(t *testing.T) {
 	for _, flagName := range []string{"-url", "-token", "-toolsets", "-agents", "-yes"} {
 		assert.Contains(t, stdout, flagName)
 	}
+	assert.Contains(t, stdout, "libraries,items,playback,browse,chapters,metadata,covers", "the --toolsets example is what answering y saves")
 	assert.Empty(t, stderr)
 }
 
@@ -324,12 +325,13 @@ func TestParseSetupFlags_RejectsPositionalArguments(t *testing.T) {
 }
 
 func TestParseSetupFlags_RejectsUnknownToolsets(t *testing.T) {
-	const known = "known: libraries, items, playback, browse, chapters, metadata, all"
+	const known = "known: libraries, items, playback, browse, chapters, metadata, covers, all"
 	tests := []struct {
 		toolsets string
 		want     string
 	}{
 		{"chapters,metdata", `unknown toolset "metdata"; ` + known},
+		{"covers,bogus", `unknown toolset "bogus"; ` + known},
 		{"nope", `unknown toolset "nope"; ` + known},
 		{"All", `unknown toolset "All"; ` + known},
 	}
@@ -350,7 +352,7 @@ func TestRun_SetupUnknownToolsetIsAUsageError(t *testing.T) {
 	assert.Equal(t, 2, code)
 	assert.Empty(t, stdout)
 	assert.True(t, strings.HasPrefix(stderr, "error: unknown toolset \"metdata\"; "+
-		"known: libraries, items, playback, browse, chapters, metadata, all\n\n"), "stderr: %s", stderr)
+		"known: libraries, items, playback, browse, chapters, metadata, covers, all\n\n"), "stderr: %s", stderr)
 	assert.Contains(t, stderr, "usage: audiobookshelf-mcp setup")
 	assert.NoFileExists(t, path)
 }

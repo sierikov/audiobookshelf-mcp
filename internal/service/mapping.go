@@ -32,7 +32,8 @@ func toItemDetail(li abs.LibraryItem) (ItemDetail, error) {
 		m := b.Metadata
 		d.Title, d.Author = m.Title, m.AuthorName
 		d.Duration, d.HasDuration = seconds(b.Duration), true
-		d.Subtitle, d.Narrator, d.SeriesName = m.Subtitle, m.NarratorName, m.SeriesName
+		d.Subtitle, d.Narrator = m.Subtitle, m.NarratorName
+		d.Authors, d.Narrators, d.Series = storedAuthors(m), storedNarrators(m), storedSeries(m)
 		d.Description, d.PublishedYear, d.Publisher = m.Description, m.PublishedYear, m.Publisher
 		d.Genres, d.Language, d.Tags = m.Genres, m.Language, b.Tags
 	case abs.MediaTypePodcast:

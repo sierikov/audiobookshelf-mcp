@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.sierikov/audiobookshelf-mcp",
   "title": "Audiobookshelf",
-  "description": "Browse Audiobookshelf libraries and listening stats; opt-in tools fix chapters, genres and tags.",
+  "description": "Browse Audiobookshelf; opt-in tools fix chapters, genres, tags, series, authors, narrators, covers.",
   "repository": {
     "url": "https://github.com/sierikov/audiobookshelf-mcp",
     "source": "github"

@@ -88,10 +88,10 @@ func (c *Client) LibrarySeries(ctx context.Context, libraryID string, page Page)
 	return resp, err
 }
 
-// Series fetches one series with its books.
+// Series fetches one series with its books and the user's progress on them.
 func (c *Client) Series(ctx context.Context, seriesID string) (Series, error) {
 	var series Series
-	err := c.get(ctx, "/api/series/"+pathParam(seriesID), nil, &series)
+	err := c.get(ctx, "/api/series/"+pathParam(seriesID), url.Values{"include": {"progress"}}, &series)
 	return series, err
 }
 
@@ -187,4 +187,34 @@ func (c *Client) Me(ctx context.Context) (User, error) {
 	var user User
 	err := c.get(ctx, "/api/me", nil, &user)
 	return user, err
+}
+
+// SearchCovers asks a cover provider ("google", "audible", …) for cover image
+// URLs matching title and author.
+func (c *Client) SearchCovers(ctx context.Context, provider, title, author string) ([]string, error) {
+	params := url.Values{"provider": {provider}, "title": {title}, "author": {author}}
+	var resp struct {
+		Results []string `json:"results"`
+	}
+	err := c.get(ctx, "/api/search/covers", params, &resp)
+	return resp.Results, err
+}
+
+// ItemCover fetches an item's current cover as a JPEG scaled to width pixels.
+// It reads at most [MaxImageBytes]. An item without a cover is a
+// [*StatusError] with status 404.
+func (c *Client) ItemCover(ctx context.Context, itemID string, width int) (Image, error) {
+	params := url.Values{"width": {strconv.Itoa(width)}, "format": {"jpeg"}}
+	return c.getImage(ctx, "/api/items/"+pathParam(itemID)+"/cover", params, MaxImageBytes)
+}
+
+// SetCoverURL makes the image at coverURL the item's cover. Audiobookshelf
+// downloads it, replaces the old cover file and needs the user's Update and
+// Upload permissions, without either of which it answers with the same 403
+// [*StatusError].
+func (c *Client) SetCoverURL(ctx context.Context, itemID, coverURL string) error {
+	body := struct {
+		URL string `json:"url"`
+	}{coverURL}
+	return c.do(ctx, http.MethodPost, "/api/items/"+pathParam(itemID)+"/cover", nil, body, nil)
 }

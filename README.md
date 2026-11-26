@@ -41,7 +41,7 @@ The Go bin directory (`$(go env GOPATH)/bin`, or `$GOBIN` if you set it) must be
 `setup` asks for:
 
 1. Your Audiobookshelf URL and API token (Settings → Users → your user → **API Token**). The token is hidden as you type. `setup` checks them and prints `Connected to … as …`.
-2. Whether to turn on the tools that edit your library (chapters, metadata). The default is no.
+2. Whether to turn on the tools that edit your library (chapters, genres, tags, descriptions, series, covers). The default is no. Yes also turns on `browse`, which finds the series and authors those tools work on.
 3. Which of the agents it found to add the server to. Press Enter for all of them.
 
 It then saves your settings and adds the server to those agents, after backing up each config file it edits. The agents' configs hold only the command to run, never your token. It looks for these agents:
@@ -65,7 +65,7 @@ Restart your agent, then ask it about your library. If you configured Claude Cod
 |---|---|
 | `--url URL` | Your Audiobookshelf URL |
 | `--token TOKEN` | Your API token. Other programs on the machine can see it in the process list, and your shell may keep it in its history, so the prompt is safer |
-| `--toolsets a,b` | Toolsets to use, as a comma-separated list. It replaces the defaults (`libraries,items,playback`): for example `libraries,items,playback,chapters,metadata`, or `all`. An empty value restores the defaults |
+| `--toolsets a,b` | Toolsets to use, as a comma-separated list. It replaces the defaults (`libraries,items,playback`): for example `libraries,items,playback,browse,chapters,metadata,covers`, or `all`. An empty value restores the defaults |
 | `--agents id,id` | Agents to add the server to, by ID. `none` adds it to no agent |
 | `--yes` | Never ask: use the flags, the saved settings and the defaults |
 
@@ -110,7 +110,7 @@ Environment variables override the file. Re-run `setup` to change the token.
 |---|---|---|---|
 | `AUDIOBOOKSHELF_URL` | Unless saved by `setup` | — | Your Audiobookshelf server URL |
 | `AUDIOBOOKSHELF_TOKEN` | Unless saved by `setup` | — | API token from Settings → Users |
-| `AUDIOBOOKSHELF_TOOLSETS` | No | `libraries,items,playback` | Comma-separated toolsets to enable: `libraries`, `items`, `playback`, `browse`, `chapters`, `metadata`. Use `all` to enable everything, including the `chapters` and `metadata` write tools. |
+| `AUDIOBOOKSHELF_TOOLSETS` | No | `libraries,items,playback` | Comma-separated toolsets to enable: `libraries`, `items`, `playback`, `browse`, `chapters`, `metadata`, `covers`. Use `all` to enable everything, including the `chapters`, `metadata` and `covers` write tools. |
 
 ## Tools
 
@@ -119,13 +119,13 @@ Environment variables override the file. Re-run `setup` to change the token.
 | `list_libraries` | List all libraries | libraries |
 | `search_library` | Search by title, author, or narrator | libraries |
 | `list_library_items` | List items with pagination | libraries |
-| `get_item` | Get detailed info about an audiobook or podcast, including its tags | items |
+| `get_item` | Get detailed info about an audiobook or podcast, including its tags and, for a book, its authors, narrators and series as lists | items |
 | `get_items_in_progress` | Get currently listening items with progress | items |
 | `get_listening_stats` | Total listening time and daily breakdown | playback |
 | `get_listening_sessions` | Recent listening sessions | playback |
 | `get_media_progress` | Progress for a specific item | playback |
 | `list_series` | List all series in a library | browse |
-| `get_series` | Get series details with books | browse |
+| `get_series` | Get series details with its books in order, each with its number | browse |
 | `get_author` | Get author details with books | browse |
 | `list_collections` | List collections in a library | browse |
 | `get_chapters` | A book's chapters, duration and audio files | chapters |
@@ -140,9 +140,11 @@ Environment variables override the file. Re-run `setup` to change the token.
 | `remove_genres` | Remove genres from books (writes) | metadata |
 | `add_tags` | Add tags to books (writes) | metadata |
 | `remove_tags` | Remove tags from books (writes) | metadata |
-| `update_items` | Set the language and description of books (writes) | metadata |
+| `update_items` | Set the language, description, series, authors and narrators of books (writes) | metadata |
+| `search_covers` | Find covers for a book: its current cover and up to 5 candidates, as small images with their links. Also shows cover links found on the web the same way | covers |
+| `set_cover` | Set a book's cover from a candidate's link or an image found on the web; final, the old cover file is deleted (writes) | covers |
 
-Default toolsets: `libraries`, `items`, `playback`. The `browse`, `chapters` and `metadata` toolsets are opt-in via `AUDIOBOOKSHELF_TOOLSETS`. `setup` asks whether to turn on the editing toolsets (`chapters`, `metadata`), and `--toolsets` sets the whole list.
+Default toolsets: `libraries`, `items`, `playback`. The `browse`, `chapters`, `metadata` and `covers` toolsets are opt-in via `AUDIOBOOKSHELF_TOOLSETS`. `covers` finds and sets book covers, and includes writes. `setup` asks whether to turn on the editing toolsets (`chapters`, `metadata`, `covers`; a yes adds `browse` too), and `--toolsets` sets the whole list.
 
 ### Fixing chapters
 
@@ -151,6 +153,16 @@ With the `chapters` toolset enabled, ask things like *"Fix the chapters for Kata
 ### Cleaning up genres, tags and descriptions
 
 With the `metadata` toolset enabled, ask things like *"Make my genres consistent"* or *"Fix the descriptions of the Harry Hole books"*. The assistant surveys the library with `get_metadata_overview`, proposes a mapping from the old genres or tags to the new ones, and shows you the affected books. After you say yes, it adds the new value first and then removes the old one, so no book is left without it. For descriptions it looks up real ones with `search_book_metadata`, shows each change from old to new, and tells you when it wrote a description itself. Every write returns what it changed, so a change can be undone: the genre and tag tools list each book's `added` or `removed` values, and `update_items` returns the `previous` values.
+
+### Series, authors and narrators
+
+With the `metadata` toolset enabled, ask things like *"Put Holly in the Holly Gibney series as book 3"* or *"Set Will Patton as the narrator of these books"*. `update_items` sets a book's series (each with a name and, if the book has one, a number), authors and narrators. Each of these replaces the book's whole list, so the assistant sends every entry the book should keep, and an empty list removes them all; `get_item` returns a book's current lists in the same shape, so the assistant can send them back with its change. Names match regardless of case, so use the exact name of an existing series or author: a misspelt name creates a new one. Audiobookshelf creates a series or an author that doesn't exist yet, and deletes a series left with no books. It also deletes an author left with no books, unless the author has a photo, an ASIN or a description. The assistant shows you each change from old to new before it saves. To undo, pass the `previous` lists the write returns; a series Audiobookshelf deleted comes back as a new one. With the `browse` toolset on too, `get_series` lists a series' books in order, each with its number, so you can check the result. `setup`'s yes turns on `browse` along with `chapters`, `metadata` and `covers`; without `setup`, add it with `--toolsets` or `AUDIOBOOKSHELF_TOOLSETS`.
+
+### Finding and setting covers
+
+With the `covers` toolset enabled, ask things like *"Find a better cover for Holly"*. `search_covers` uses Audiobookshelf's own cover search. The provider defaults to `google`; the others are the ones `search_book_metadata` takes. It returns the book's current cover and up to 5 candidates as small image previews, each candidate also with its link. A preview fits inside 400 px wide and 800 px high: a larger image is scaled down to fit, and a small JPEG, PNG or GIF is shown as it is. A WebP, which is how FantLab serves its covers, is converted to a JPEG, because some apps don't show WebP. Apps that show images from tools, such as Claude Desktop, display them. If your app doesn't, the assistant gives you the links instead, and `set_cover` waits until you have looked at them. A candidate that can't be fetched, isn't an image, is over 2 MiB or has too many pixels (*too large to preview*) comes back with a short problem and no image, and the others still arrive. A book with no cover gets candidates only. So does one whose cover Audiobookshelf can't read: that is reported (`currentProblem`) and does not fail the search.
+
+You pick one by its number, and `set_cover` sets it by its link. The cover sources can return the wrong book or edition. If none of the candidates is right, an assistant that can search the web looks for the cover there, for example on the publisher's or an audiobook store's page, and `set_cover` takes that image's link too. `search_covers` shows those links the same way, next to the current cover: it takes up to 5 of them (`urls`) in place of a source to search. **A cover change is final**: Audiobookshelf deletes the old cover file, so nothing can undo it. The assistant shows you the old and new covers side by side and asks first. `set_cover` needs the Audiobookshelf user's **Update** and **Upload** permissions; `setup` prints a note when `covers` or `all` is on and your user lacks either.
 
 ---
 
@@ -282,10 +294,11 @@ Add to `~/.config/opencode/config.json`:
 
 ## Security
 
-The default toolsets are **read-only**. Two opt-in toolsets write, and both need an API token whose user has the **Update** permission in Audiobookshelf. Neither needs admin.
+The default toolsets are **read-only**. Three opt-in toolsets write, and all need an API token whose user has the **Update** permission in Audiobookshelf; `set_cover` also needs the **Upload** permission. None needs admin.
 
 - `chapters`: `set_chapters` and `rename_chapters` replace a book's chapters. They are annotated as destructive so MCP clients ask before running them, and return the previous chapters so a change can be undone when those old chapters were valid.
-- `metadata`: `add_genres`, `remove_genres`, `add_tags` and `remove_tags` add and remove genres and tags, and `update_items` sets language and description. The remove tools and `update_items` are annotated as destructive. Every write can be undone, except what the text checks below refuse: the list tools by calling the opposite tool with each book's `added` or `removed` values, `update_items` by passing the `previous` values it returns. Audiobookshelf can limit what a user sees by tag, so `add_tags` and `remove_tags` can change what a restricted user, such as a kids account, can see.
+- `metadata`: `add_genres`, `remove_genres`, `add_tags` and `remove_tags` add and remove genres and tags, and `update_items` sets language, description, series, authors and narrators. The remove tools and `update_items` are annotated as destructive. Every write can be undone, except what the text checks below refuse: the list tools by calling the opposite tool with each book's `added` or `removed` values, `update_items` by passing the `previous` values it returns. Audiobookshelf can limit what a user sees by tag, so `add_tags` and `remove_tags` can change what a restricted user, such as a kids account, can see.
+- `covers`: `search_covers` only reads, but it downloads the candidate images itself, from addresses the cover source chose or the assistant found on the web. A download carries no Audiobookshelf token or other credentials, takes at most 15 seconds, follows at most 3 redirects (to `http` or `https` addresses only), accepts only a JPEG, PNG, WebP or GIF of at most 2 MiB, and is never written to disk. `set_cover` replaces a book's cover with the image at a web address. That is final, because Audiobookshelf deletes the old cover file, so it is annotated as destructive and tells the assistant to show you the old and new covers side by side and get your yes first.
 
 `all` includes every write tool; list toolsets explicitly to stay read-only. No tool deletes items, controls playback, or manages users. The API token comes from the settings file (readable only by you) or an environment variable, and is never logged or exposed.
 
@@ -293,14 +306,14 @@ Every call is checked against the tool's input schema before it runs. An unknown
 
 ### Text from other sites
 
-Your own Audiobookshelf is trusted: what the tools read from it is passed on as it is. Text from other sites is not. Three tools return it: `search_book_metadata` (Audible, FantLab, Google Books, iTunes, Open Library, through Audiobookshelf's search), `search_audible` and `get_audible_chapters`. Their results start with `"untrusted": true` and a `source`, and their text is cleaned first: descriptions keep only simple HTML (below), every other field becomes plain text, and invisible characters used to hide text are removed. The server instructions tell the model to treat that text as data, never as instructions. A caveat: much of a library's text first came from such sites, through Audiobookshelf's own matching, or from the audio files' tags. Once stored it counts as trusted like the rest.
+Your own Audiobookshelf is trusted: what the tools read from it is passed on as it is. Text from other sites is not. Four tools return it: `search_book_metadata` (Audible, FantLab, Google Books, iTunes, Open Library, through Audiobookshelf's search), `search_audible`, `get_audible_chapters` and `search_covers` (the same sources). Their results start with `"untrusted": true` and a `source`, and their text is cleaned first: descriptions keep only simple HTML (below), every other field becomes plain text, and invisible characters used to hide text are removed. For `search_covers` the text is each candidate's link: one that is not an `http` or `https` address, has whitespace or is over 2048 bytes is not downloaded, and comes back quoted and cut. The server instructions tell the model to treat that text as data, never as instructions. A caveat: much of a library's text first came from such sites, through Audiobookshelf's own matching, or from the audio files' tags. Once stored it counts as trusted like the rest.
 
 What the write tools store is checked first, because that is where text from other sites can enter the library:
 
 - Descriptions (`update_items`) keep only Audiobookshelf's own allowlist: `p`, `ol`, `ul`, `li`, `strong`, `em`, `del`, `br`, `b`, `i`, and `a` with an `http`, `https` or `mailto` link. Scripts, styles, comments, other attributes and invisible characters are removed before saving, whatever Audiobookshelf version runs. A description is at most 10,000 characters, and one with no text left after cleaning is refused.
-- Genres and tags being added, the language, and chapter titles are plain text: a value with `<` or `>`, a control or invisible character, or more than 64 characters (200 for chapter titles) is refused with an error that names it.
-- A language, description or chapter title equal to what the book already has passes as it is, so old values never block an edit. Removing accepts any value, so junk already in the library can still be found and removed.
-- Undo restores the previous values, except what these checks refuse: a description comes back cleaned, and a removed genre or tag the checks refuse can't be added back.
+- Genres and tags being added, the language, series names, authors, narrators and chapter titles are plain text: a value with `<` or `>`, a control or invisible character, or more than 64 characters (200 for chapter titles) is refused with an error that names it. A series number is plain text too, at most 16 characters.
+- A language, description, series, author, narrator or chapter title equal to what the book already has passes as it is, in a list too, so old values never block an edit. Removing accepts any value, so junk already in the library can still be found and removed.
+- Undo restores the previous values, except what these checks refuse: a description comes back cleaned, a removed genre or tag the checks refuse can't be added back, and a series Audiobookshelf deleted comes back as a new one.
 
 ## Releasing
 

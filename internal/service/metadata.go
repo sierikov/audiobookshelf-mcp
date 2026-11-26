@@ -140,13 +140,19 @@ func (s *Metadata) SearchBooks(ctx context.Context, itemID, provider, region, ti
 func searchProvider(provider, region string) (apiProvider, normalised string, err error) {
 	switch {
 	case !slices.Contains(metadataProviders, provider):
-		return "", "", fmt.Errorf("%w %q (use one of: %s)", ErrUnknownProvider, provider, strings.Join(metadataProviders, ", "))
+		return "", "", unknownProvider(provider)
 	case provider == "audible":
 		return audibleProvider(region)
 	case strings.TrimSpace(region) != "":
 		return "", "", fmt.Errorf("%w: got region %q for %s", ErrRegionNotAudible, region, provider)
 	}
 	return provider, "", nil
+}
+
+// unknownProvider is the [ErrUnknownProvider] error for a name that is not
+// one of [MetadataProviders].
+func unknownProvider(provider string) error {
+	return fmt.Errorf("%w %q (use one of: %s)", ErrUnknownProvider, provider, strings.Join(metadataProviders, ", "))
 }
 
 // toCandidates maps a provider's matches, cleaning their text: the

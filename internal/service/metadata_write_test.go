@@ -444,7 +444,7 @@ func TestUpdate_CheckErrors(t *testing.T) {
 		{"neither field", []ItemChange{
 			{ItemID: "li_1", Language: new("English")},
 			{ItemID: " li_2 "},
-		}, nil, "item 2 (li_2): sets neither language nor description"},
+		}, nil, "item 2 (li_2): sets none of language, description, series, authors, narrators"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -672,4 +672,296 @@ func TestUpdate_ErrorQuotesOnlyTheStartOfALongValue(t *testing.T) {
 	_, err := NewMetadata(api).Update(t.Context(), []ItemChange{{ItemID: "li_1", Language: new(strings.Repeat("a", 16000))}})
 
 	require.EqualError(t, err, fmt.Sprintf(`item 1 (li_1): language (%q…) is 16000 characters long; at most 64`, strings.Repeat("a", 40)))
+}
+
+// creditsBook is a book with the given series, authors and narrators and
+// nothing else set.
+func creditsBook(id, title string, series []abs.SeriesRef, authors []abs.AuthorRef, narrators []string) abs.LibraryItem {
+	return libraryItem(id, abs.MediaTypeBook, abs.BookMedia{
+		Metadata: abs.BookMetadata{Title: title, Series: series, Authors: authors, Narrators: narrators},
+	})
+}
+
+// updateAccepted runs an update of one book stored as stored, read twice as
+// the call does, and returns what was sent to Audiobookshelf.
+func updateAccepted(t *testing.T, stored abs.LibraryItem, change ItemChange) []abs.ItemUpdate {
+	t.Helper()
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, []string{change.ItemID}).Return([]abs.LibraryItem{stored}, nil).Twice()
+	sent := recordUpdates(api, 1)
+
+	_, err := NewMetadata(api).Update(t.Context(), []ItemChange{change})
+
+	require.NoError(t, err)
+	require.Len(t, *sent, 1)
+	return *sent
+}
+
+func TestUpdate_SetsSeriesAuthorsNarrators(t *testing.T) {
+	holly := []abs.SeriesRef{{ID: "s1", Name: "Holly Gibney", Sequence: "3"}}
+	king := []abs.AuthorRef{{ID: "a1", Name: "Stephen King"}}
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1"}).
+		Return([]abs.LibraryItem{creditsBook("li_1", "Holly", holly, king, []string{})}, nil).Once()
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1"}).
+		Return([]abs.LibraryItem{creditsBook("li_1", "Holly", holly, king, []string{"Will Patton"})}, nil).Once()
+	sent := recordUpdates(api, 1)
+
+	got, err := NewMetadata(api).Update(t.Context(), []ItemChange{{
+		ItemID:    "li_1",
+		Series:    new([]SeriesEntry{{Name: "Holly Gibney", Sequence: "3"}}),
+		Authors:   new([]string{"Stephen King"}),
+		Narrators: new([]string{"Will Patton"}),
+	}})
+
+	require.NoError(t, err)
+	// Names go alone: Audiobookshelf finds each series and author by name, or
+	// creates it.
+	assert.Equal(t, []abs.ItemUpdate{{ID: "li_1", MediaPayload: abs.MediaPayload{Metadata: &abs.MetadataPayload{
+		Series:    &[]abs.SeriesRef{{Name: "Holly Gibney", Sequence: "3"}},
+		Authors:   &[]abs.AuthorRef{{Name: "Stephen King"}},
+		Narrators: &[]string{"Will Patton"},
+	}}}}, *sent)
+	assertSentJSON(t, `[{"id":"li_1","mediaPayload":{"metadata":{
+		"series":[{"name":"Holly Gibney","sequence":"3"}],
+		"authors":[{"name":"Stephen King"}],
+		"narrators":["Will Patton"]
+	}}}]`, *sent)
+	assert.Equal(t, UpdateResult{Changed: 1, Items: []ItemUpdateResult{{
+		ItemID: "li_1", Title: "Holly",
+		Previous: ItemFields{
+			Series:    new([]SeriesEntry{{Name: "Holly Gibney", Sequence: "3"}}),
+			Authors:   new([]string{"Stephen King"}),
+			Narrators: new([]string{}),
+		},
+		Now: ItemFields{
+			Series:    new([]SeriesEntry{{Name: "Holly Gibney", Sequence: "3"}}),
+			Authors:   new([]string{"Stephen King"}),
+			Narrators: new([]string{"Will Patton"}),
+		},
+	}}}, got)
+}
+
+func TestUpdate_TrimsListValues(t *testing.T) {
+	change := ItemChange{
+		ItemID:    "li_1",
+		Series:    new([]SeriesEntry{{Name: " Holly Gibney ", Sequence: " 3 "}, {Name: "Bill Hodges"}}),
+		Authors:   new([]string{" Stephen King "}),
+		Narrators: new([]string{"\tWill Patton\n"}),
+	}
+
+	sent := updateAccepted(t, nullBook("li_1", "Holly"), change)
+
+	assertSentJSON(t, `[{"id":"li_1","mediaPayload":{"metadata":{
+		"series":[{"name":"Holly Gibney","sequence":"3"},{"name":"Bill Hodges"}],
+		"authors":[{"name":"Stephen King"}],
+		"narrators":["Will Patton"]
+	}}}]`, sent)
+	assert.Equal(t, " Holly Gibney ", (*change.Series)[0].Name, "the caller's change is left as it was")
+	assert.Equal(t, " Stephen King ", (*change.Authors)[0], "the caller's change is left as it was")
+}
+
+func TestUpdate_UnchangedListPassesUnchecked(t *testing.T) {
+	// The stored author ends in a right-to-left override, which a new value
+	// would be refused for.
+	const hidden = "Stephen King\u202e"
+	stored := creditsBook("li_1", "Holly", nil, []abs.AuthorRef{{ID: "a1", Name: hidden}}, nil)
+
+	t.Run("as it is", func(t *testing.T) {
+		sent := updateAccepted(t, stored, ItemChange{ItemID: "li_1", Authors: new([]string{hidden})})
+
+		assert.Equal(t, &[]abs.AuthorRef{{Name: hidden}}, sent[0].MediaPayload.Metadata.Authors)
+	})
+	t.Run("next to a new one", func(t *testing.T) {
+		sent := updateAccepted(t, stored, ItemChange{ItemID: "li_1", Authors: new([]string{hidden, "Owen King"})})
+
+		assert.Equal(t, &[]abs.AuthorRef{{Name: hidden}, {Name: "Owen King"}}, sent[0].MediaPayload.Metadata.Authors)
+	})
+}
+
+func TestUpdate_UnchangedSeriesPassUnchecked(t *testing.T) {
+	// A stored series that new text would be refused for, a sequence cut
+	// loose from the others, and a name stored with spaces around it.
+	long := strings.Repeat("1", MaxSequenceLength+1)
+	stored := creditsBook("li_1", "Holly", []abs.SeriesRef{
+		{ID: "s1", Name: "Holly\u202e Gibney", Sequence: long},
+		{ID: "s2", Name: " Bill Hodges ", Sequence: "1"},
+	}, nil, nil)
+
+	t.Run("the same list", func(t *testing.T) {
+		sent := updateAccepted(t, stored, ItemChange{ItemID: "li_1", Series: new([]SeriesEntry{
+			{Name: "Holly\u202e Gibney", Sequence: long}, {Name: "Bill Hodges", Sequence: "1"},
+		})})
+
+		assert.Equal(t, &[]abs.SeriesRef{
+			{Name: "Holly\u202e Gibney", Sequence: long}, {Name: "Bill Hodges", Sequence: "1"},
+		}, sent[0].MediaPayload.Metadata.Series)
+	})
+	t.Run("in another order", func(t *testing.T) {
+		sent := updateAccepted(t, stored, ItemChange{ItemID: "li_1", Series: new([]SeriesEntry{
+			{Name: "Bill Hodges", Sequence: "1"}, {Name: "Holly\u202e Gibney", Sequence: long},
+		})})
+
+		assert.Equal(t, &[]abs.SeriesRef{
+			{Name: "Bill Hodges", Sequence: "1"}, {Name: "Holly\u202e Gibney", Sequence: long},
+		}, sent[0].MediaPayload.Metadata.Series)
+	})
+	t.Run("a stored name with a new sequence", func(t *testing.T) {
+		sent := updateAccepted(t, stored, ItemChange{ItemID: "li_1", Series: new([]SeriesEntry{
+			{Name: "Holly\u202e Gibney", Sequence: "4"},
+		})})
+
+		assert.Equal(t, &[]abs.SeriesRef{{Name: "Holly\u202e Gibney", Sequence: "4"}}, sent[0].MediaPayload.Metadata.Series)
+	})
+}
+
+func TestUpdate_RefusesBadNames(t *testing.T) {
+	stored := creditsBook("li_1", "Holly", []abs.SeriesRef{{ID: "s1", Name: "Holly Gibney", Sequence: "3"}},
+		[]abs.AuthorRef{{ID: "a1", Name: "Stephen King"}}, []string{"Will Patton"})
+	tests := []struct {
+		name   string
+		change ItemChange
+		want   string
+	}{
+		{
+			"series name with markup",
+			ItemChange{Series: new([]SeriesEntry{{Name: "<b>Holly</b>"}})},
+			`series name ("<b>Holly</b>") contains "<"; use plain text without markup`,
+		},
+		{
+			"long series name",
+			ItemChange{Series: new([]SeriesEntry{{Name: strings.Repeat("я", MaxValueLength+1)}})},
+			fmt.Sprintf(`series name (%q…) is 65 characters long; at most 64`, strings.Repeat("я", 40)),
+		},
+		{
+			"sequence with a control character",
+			ItemChange{Series: new([]SeriesEntry{{Name: "Holly Gibney", Sequence: "1\t2"}})},
+			`series sequence ("1\t2") contains the control character U+0009`,
+		},
+		{
+			"long sequence",
+			ItemChange{Series: new([]SeriesEntry{{Name: "Holly Gibney", Sequence: strings.Repeat("1", MaxSequenceLength+1)}})},
+			`series sequence ("11111111111111111") is 17 characters long; at most 16`,
+		},
+		{
+			"sequence with markup",
+			ItemChange{Series: new([]SeriesEntry{{Name: "Holly Gibney", Sequence: "<4>"}})},
+			`series sequence ("<4>") contains "<"; use plain text without markup`,
+		},
+		{
+			"empty series name",
+			ItemChange{Series: new([]SeriesEntry{{Name: "Holly Gibney"}, {Name: "  ", Sequence: "1"}})},
+			`series 2 has no name`,
+		},
+		{
+			"same series twice",
+			ItemChange{Series: new([]SeriesEntry{{Name: "Holly Gibney", Sequence: "3"}, {Name: "holly gibney", Sequence: "4"}})},
+			`series 2 ("holly gibney") repeats series 1 ("Holly Gibney"), ignoring case`,
+		},
+		{
+			"long author",
+			ItemChange{Authors: new([]string{strings.Repeat("я", MaxValueLength+1)})},
+			fmt.Sprintf(`author (%q…) is 65 characters long; at most 64`, strings.Repeat("я", 40)),
+		},
+		{
+			"author with a hidden character",
+			ItemChange{Authors: new([]string{"Stephen King", "Owen King\u200b"})},
+			`author ("Owen King\u200b") contains the invisible character U+200B`,
+		},
+		{
+			"empty author",
+			ItemChange{Authors: new([]string{""})},
+			`author 1 has no name`,
+		},
+		{
+			"same author twice",
+			ItemChange{Authors: new([]string{"Stephen King", " stephen king"})},
+			`author 2 ("stephen king") repeats author 1 ("Stephen King"), ignoring case`,
+		},
+		{
+			"narrator with markup",
+			ItemChange{Narrators: new([]string{"<i>Will Patton</i>"})},
+			`narrator ("<i>Will Patton</i>") contains "<"; use plain text without markup`,
+		},
+		{
+			"same narrator twice",
+			ItemChange{Narrators: new([]string{"Will Patton", "Will Patton"})},
+			`narrator 2 ("Will Patton") repeats narrator 1 ("Will Patton"), ignoring case`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.change.ItemID = "li_1"
+
+			updateRefused(t, stored, tt.change, "item 1 (li_1): "+tt.want)
+		})
+	}
+}
+
+func TestUpdate_ListRefusalNamesTheBook(t *testing.T) {
+	api := NewMockMetadataAPI(t) // an UpdateItems call fails the test
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1", "li_2"}).Return([]abs.LibraryItem{
+		nullBook("li_1", "Holly"), nullBook("li_2", "Mr. Mercedes"),
+	}, nil).Once()
+
+	_, err := NewMetadata(api).Update(t.Context(), []ItemChange{
+		{ItemID: "li_1", Authors: new([]string{"Stephen King"})},
+		{ItemID: "li_2", Authors: new([]string{"Stephen King", "<i>x</i>"})},
+	})
+
+	var itemErr *ItemError
+	require.ErrorAs(t, err, &itemErr)
+	assert.Equal(t, 2, itemErr.Position)
+	assert.Equal(t, "li_2", itemErr.ItemID)
+	assert.Equal(t, `author ("<i>x</i>") contains "<"; use plain text without markup`, itemErr.Reason)
+}
+
+func TestUpdate_EmptySeriesClears(t *testing.T) {
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1"}).Return([]abs.LibraryItem{creditsBook("li_1", "Holly", []abs.SeriesRef{
+		{ID: "s1", Name: "Holly Gibney", Sequence: "3"}, {ID: "s2", Name: "Mr. Mercedes"},
+	}, nil, nil)}, nil).Once()
+	api.EXPECT().ItemsByID(mock.Anything, []string{"li_1"}).
+		Return([]abs.LibraryItem{creditsBook("li_1", "Holly", nil, nil, nil)}, nil).Once()
+	sent := recordUpdates(api, 1)
+
+	got, err := NewMetadata(api).Update(t.Context(), []ItemChange{{ItemID: "li_1", Series: new([]SeriesEntry{})}})
+
+	require.NoError(t, err)
+	assertSentJSON(t, `[{"id":"li_1","mediaPayload":{"metadata":{"series":[]}}}]`, *sent)
+	assert.Equal(t, UpdateResult{Changed: 1, Items: []ItemUpdateResult{{
+		ItemID: "li_1", Title: "Holly",
+		Previous: ItemFields{Series: new([]SeriesEntry{{Name: "Holly Gibney", Sequence: "3"}, {Name: "Mr. Mercedes"}})},
+		Now:      ItemFields{Series: new([]SeriesEntry{})},
+	}}}, got)
+}
+
+func TestUpdate_ListLeftOutIsNotSent(t *testing.T) {
+	stored := creditsBook("li_1", "Holly", nil, []abs.AuthorRef{{Name: "Stephen King"}}, nil)
+
+	sent := updateAccepted(t, stored, ItemChange{ItemID: "li_1", Narrators: new([]string{"Will Patton"})})
+
+	assertSentJSON(t, `[{"id":"li_1","mediaPayload":{"metadata":{"narrators":["Will Patton"]}}}]`, sent)
+}
+
+func TestCheckChanges_NothingSet(t *testing.T) {
+	_, _, err := checkChanges([]ItemChange{{ItemID: "li_1", Language: new("English")}, {ItemID: " li_2 "}})
+
+	var itemErr *ItemError
+	require.ErrorAs(t, err, &itemErr)
+	assert.Equal(t, 2, itemErr.Position)
+	assert.Equal(t, "li_2", itemErr.ItemID)
+	assert.Equal(t, "sets none of language, description, series, authors, narrators", itemErr.Reason)
+}
+
+func TestCheckChanges_EmptyListsCount(t *testing.T) {
+	for _, c := range []ItemChange{
+		{ItemID: "li_1", Series: new([]SeriesEntry{})},
+		{ItemID: "li_1", Authors: new([]string{})},
+		{ItemID: "li_1", Narrators: new([]string{})},
+	} {
+		_, _, err := checkChanges([]ItemChange{c})
+
+		assert.NoError(t, err)
+	}
 }

@@ -59,3 +59,39 @@ func TestFlexStrings_RejectsOtherShapes(t *testing.T) {
 	var got abs.FlexStrings
 	require.Error(t, json.Unmarshal([]byte(`42`), &got))
 }
+
+func TestFlexSeries_Shapes(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []abs.SeriesRef
+	}{
+		{"array", `{"series":[{"id":"s1","name":"Holly Gibney","sequence":"1"}]}`,
+			[]abs.SeriesRef{{ID: "s1", Name: "Holly Gibney", Sequence: "1"}}},
+		{"single object", `{"series":{"id":"s1","name":"Holly Gibney","sequence":"3"}}`,
+			[]abs.SeriesRef{{ID: "s1", Name: "Holly Gibney", Sequence: "3"}}},
+		{"null", `{"series":null}`, nil},
+		{"absent", `{}`, nil},
+		{"empty array", `{"series":[]}`, nil},
+		{"null sequence", `{"series":[{"id":"s2","name":"X","sequence":null}]}`,
+			[]abs.SeriesRef{{ID: "s2", Name: "X"}}},
+		{"two entries", `{"series":[{"name":"A","sequence":"1"},{"name":"B","sequence":"1.5"}]}`,
+			[]abs.SeriesRef{{Name: "A", Sequence: "1"}, {Name: "B", Sequence: "1.5"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got abs.BookMetadata
+			require.NoError(t, json.Unmarshal([]byte(tt.in), &got))
+			if len(tt.want) == 0 {
+				assert.Empty(t, got.Series)
+				return
+			}
+			assert.Equal(t, abs.FlexSeries(tt.want), got.Series)
+		})
+	}
+}
+
+func TestFlexSeries_RejectsOtherShapes(t *testing.T) {
+	var got abs.FlexSeries
+	require.Error(t, json.Unmarshal([]byte(`"Holly Gibney"`), &got))
+}

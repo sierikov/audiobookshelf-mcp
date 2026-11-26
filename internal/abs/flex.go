@@ -67,3 +67,32 @@ func (f *FlexStrings) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
+// FlexSeries is a book's list of series. An expanded item carries an array,
+// other responses a single object, and a book with no series may carry null.
+// A single object becomes a list of one and null becomes nil.
+type FlexSeries []SeriesRef
+
+// UnmarshalJSON implements [json.Unmarshaler].
+func (f *FlexSeries) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	switch {
+	case bytes.Equal(data, []byte("null")):
+		*f = nil
+	case len(data) > 0 && data[0] == '[':
+		var list []SeriesRef
+		if err := json.Unmarshal(data, &list); err != nil {
+			return err
+		}
+		*f = list
+	case len(data) > 0 && data[0] == '{':
+		var one SeriesRef
+		if err := json.Unmarshal(data, &one); err != nil {
+			return err
+		}
+		*f = FlexSeries{one}
+	default:
+		return fmt.Errorf("cannot decode %s as a list of series or one series", data)
+	}
+	return nil
+}

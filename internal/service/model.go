@@ -36,12 +36,16 @@ type Item struct {
 	HasDuration bool
 }
 
-// ItemDetail is a library item with all of its metadata.
+// ItemDetail is a library item with all of its metadata. Authors, Narrators
+// and Series are a book's lists as update_items takes them: never nil for a
+// book, nil for a podcast.
 type ItemDetail struct {
 	Item
 	Subtitle      string
 	Narrator      string
-	SeriesName    string
+	Authors       []string
+	Narrators     []string
+	Series        []SeriesEntry
 	Description   string
 	PublishedYear string
 	Publisher     string
@@ -118,12 +122,20 @@ type SeriesPage struct {
 	Total  int
 }
 
-// SeriesDetail is a series with its books.
+// SeriesBook is a book in a series with its place there. Sequence is free text
+// ("1", "1.5", "0") and empty when the book has no number in the series.
+type SeriesBook struct {
+	Item
+	Sequence string
+}
+
+// SeriesDetail is a series with its books in reading order: numbered books
+// first, in numeric order, then the rest by title. Books is never nil.
 type SeriesDetail struct {
 	ID          string
 	Name        string
 	Description string
-	Books       []Item
+	Books       []SeriesBook
 }
 
 // AuthorDetail is an author with their books.

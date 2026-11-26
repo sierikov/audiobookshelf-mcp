@@ -45,6 +45,35 @@ func (s *ItemsWiringSuite) TestGetItem_Book() {
 	s.Equal("2025", d.PublishedYear)
 }
 
+func (s *ItemsWiringSuite) TestGetItem_BookListsInUpdateItemsShape() {
+	s.routes["/api/items/item-1"] = abstest.BookItemFull("item-1", map[string]any{
+		"title":        "Joyland",
+		"authorName":   "Stephen King, Richard Bachman",
+		"narratorName": "Michael Kelly, Will Patton",
+		"seriesName":   "Hard Case Crime #1, Holly Gibney",
+		"authors": []map[string]any{
+			{"id": "au_1", "name": "Stephen King"},
+			{"id": "au_2", "name": "Richard Bachman"},
+		},
+		"narrators": []string{"Michael Kelly", "Will Patton"},
+		"series": []map[string]any{
+			{"id": "se_1", "name": "Hard Case Crime", "sequence": "1"},
+			{"id": "se_2", "name": "Holly Gibney", "sequence": ""},
+		},
+	}, 36000.0)
+	s.StartServer()
+
+	result := s.callTool(s.tool("get_item"), map[string]any{"itemId": "item-1"})
+
+	s.JSONEq(`{
+		"id":"item-1","mediaType":"book","title":"Joyland",
+		"author":"Stephen King, Richard Bachman","narrator":"Michael Kelly, Will Patton",
+		"authors":["Stephen King","Richard Bachman"],"narrators":["Michael Kelly","Will Patton"],
+		"series":[{"name":"Hard Case Crime","sequence":"1"},{"name":"Holly Gibney"}],
+		"duration":"10h 0m"
+	}`, resultText(result))
+}
+
 func (s *ItemsWiringSuite) TestGetItem_Podcast() {
 	s.routes["/api/items/pod-1"] = abstest.PodcastItem("pod-1", "Hardcore History", "Dan Carlin", 68)
 	s.StartServer()

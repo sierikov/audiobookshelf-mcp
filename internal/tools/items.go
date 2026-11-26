@@ -19,22 +19,27 @@ func ItemTools(svc ItemService) []ServerTool {
 	}
 }
 
+// itemDetail is an item as get_item shows it. For a book, authors, narrators
+// and series are lists in the shape update_items takes, always there and []
+// when empty; a podcast has none of them.
 type itemDetail struct {
-	ID            string   `json:"id"`
-	MediaType     string   `json:"mediaType"`
-	Title         string   `json:"title"`
-	Subtitle      string   `json:"subtitle,omitempty"`
-	Author        string   `json:"author,omitempty"`
-	Narrator      string   `json:"narrator,omitempty"`
-	SeriesName    string   `json:"seriesName,omitempty"`
-	Description   string   `json:"description,omitempty"`
-	Duration      string   `json:"duration,omitempty"`
-	PublishedYear string   `json:"publishedYear,omitempty"`
-	Publisher     string   `json:"publisher,omitempty"`
-	Genres        []string `json:"genres,omitempty"`
-	Tags          []string `json:"tags,omitempty"`
-	Language      string   `json:"language,omitempty"`
-	NumEpisodes   int      `json:"numEpisodes,omitempty"`
+	ID            string         `json:"id"`
+	MediaType     string         `json:"mediaType"`
+	Title         string         `json:"title"`
+	Subtitle      string         `json:"subtitle,omitempty"`
+	Author        string         `json:"author,omitempty"`
+	Narrator      string         `json:"narrator,omitempty"`
+	Authors       []string       `json:"authors,omitzero"`
+	Narrators     []string       `json:"narrators,omitzero"`
+	Series        []seriesOutput `json:"series,omitzero"`
+	Description   string         `json:"description,omitempty"`
+	Duration      string         `json:"duration,omitempty"`
+	PublishedYear string         `json:"publishedYear,omitempty"`
+	Publisher     string         `json:"publisher,omitempty"`
+	Genres        []string       `json:"genres,omitempty"`
+	Tags          []string       `json:"tags,omitempty"`
+	Language      string         `json:"language,omitempty"`
+	NumEpisodes   int            `json:"numEpisodes,omitempty"`
 }
 
 func getItem(svc ItemService) ServerTool {
@@ -77,7 +82,9 @@ func getItem(svc ItemService) ServerTool {
 				Subtitle:      d.Subtitle,
 				Author:        d.Author,
 				Narrator:      d.Narrator,
-				SeriesName:    d.SeriesName,
+				Authors:       d.Authors,
+				Narrators:     d.Narrators,
+				Series:        toSeriesOutput(d.Series),
 				Description:   d.Description,
 				Duration:      itemDuration(d.Item),
 				PublishedYear: d.PublishedYear,

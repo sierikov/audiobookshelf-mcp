@@ -27,6 +27,7 @@ func mockServices(t *testing.T) Services {
 		Browse:    NewMockBrowseService(t),
 		Chapters:  NewMockChapterService(t),
 		Metadata:  NewMockMetadataService(t),
+		Covers:    NewMockCoversService(t),
 	}
 }
 
@@ -94,9 +95,17 @@ func TestRegister_RejectsArgumentsTheSchemaDoesNotAllow(t *testing.T) {
 			[]string{"invalid arguments for add_tags:", "/properties/tags", "minItems"}},
 		{"no items", "update_items", map[string]any{"items": []any{}},
 			[]string{"invalid arguments for update_items:", "/properties/items", "minItems"}},
+		{"no cover urls", "search_covers", map[string]any{"itemId": "li_1", "urls": []any{}},
+			[]string{"invalid arguments for search_covers:", "/properties/urls", "minItems"}},
+		{"too many cover urls", "search_covers", map[string]any{"itemId": "li_1", "urls": manyIDs(6)},
+			[]string{"invalid arguments for search_covers:", "/properties/urls", "maxItems"}},
 		// null is an error until the strict-mode card decides it means "not given".
 		{"null limit", "find_items", map[string]any{"libraryId": "lib-1", "limit": nil},
 			[]string{"invalid arguments for find_items:", `has type "null"`}},
+		{"cover provider outside the enum", "search_covers", map[string]any{"itemId": "li_1", "provider": "bing"},
+			[]string{"invalid arguments for search_covers:", "bing"}},
+		{"cover url missing", "set_cover", map[string]any{"itemId": "li_1"},
+			[]string{"invalid arguments for set_cover:", `missing properties: ["url"]`}},
 		{"unknown key", "find_items", map[string]any{"libraryId": "lib_1", "genres": []any{"Fantasy"}},
 			[]string{`invalid arguments for find_items: unexpected additional properties ["genres"]`}},
 		{"unknown key inside an item", "update_items",
@@ -196,6 +205,21 @@ func TestRegister_ValidCallsReachTheServices(t *testing.T) {
 					{ItemID: "li_1", Language: new("Russian")}, {ItemID: "li_2", Description: new("")},
 				}).Return(service.UpdateResult{}, nil)
 			}, ""},
+		{"search_covers", map[string]any{"itemId": "li_1", "provider": "audible", "title": "Holly", "author": "Stephen King"},
+			func(s Services) {
+				s.Covers.(*MockCoversService).EXPECT().Find(mock.Anything, "li_1", "audible", "Holly", "Stephen King").
+					Return(service.CoverSearch{ItemID: "li_1", Title: "Holly", Provider: "audible"}, nil)
+			}, `"source":"audible"`},
+		{"search_covers", map[string]any{"itemId": "li_1"},
+			func(s Services) {
+				s.Covers.(*MockCoversService).EXPECT().Find(mock.Anything, "li_1", "google", "", "").
+					Return(service.CoverSearch{ItemID: "li_1", Title: "Holly", Provider: "google"}, nil)
+			}, `"source":"google"`},
+		{"set_cover", map[string]any{"itemId": "li_1", "url": "https://img.example/1.jpg"},
+			func(s Services) {
+				s.Covers.(*MockCoversService).EXPECT().Set(mock.Anything, "li_1", "https://img.example/1.jpg").
+					Return(service.CoverSet{ItemID: "li_1", Title: "Holly"}, nil)
+			}, `"title":"Holly"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.tool, func(t *testing.T) {

@@ -4,7 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/sierikov/audiobookshelf-mcp/internal/service"
 )
@@ -46,23 +48,55 @@ func TestGetSeries(t *testing.T) {
 	svc := NewMockBrowseService(t)
 	svc.EXPECT().Series(mock.Anything, "s-1").Return(service.SeriesDetail{
 		ID: "s-1", Name: "Stormlight Archive", Description: "Epic fantasy",
-		Books: []service.Item{book("b1", "The Way of Kings", "Brandon Sanderson", 53*time.Hour)},
+		Books: []service.SeriesBook{
+			{Item: book("b1", "The Way of Kings", "Brandon Sanderson", 53*time.Hour), Sequence: "1"},
+			{Item: book("b2", "Edgedancer", "Brandon Sanderson", 5*time.Hour), Sequence: "2.5"},
+		},
 	}, nil)
 
 	result := call(t, BrowseTools(svc), "get_series", map[string]any{"seriesId": "s-1"})
 
 	assertJSON(t, `{"id":"s-1","name":"Stormlight Archive","description":"Epic fantasy","books":[
-		{"id":"b1","mediaType":"book","title":"The Way of Kings","author":"Brandon Sanderson","duration":"53h 0m"}
+		{"id":"b1","mediaType":"book","title":"The Way of Kings","author":"Brandon Sanderson","duration":"53h 0m","sequence":"1"},
+		{"id":"b2","mediaType":"book","title":"Edgedancer","author":"Brandon Sanderson","duration":"5h 0m","sequence":"2.5"}
 	]}`, result)
 }
 
-func TestGetSeries_WithoutBooksRendersNull(t *testing.T) {
+func TestGetSeries_LeavesOutAnEmptySequence(t *testing.T) {
+	svc := NewMockBrowseService(t)
+	svc.EXPECT().Series(mock.Anything, "s-1").Return(service.SeriesDetail{
+		ID: "s-1", Name: "Stormlight Archive",
+		Books: []service.SeriesBook{{Item: book("b1", "Dawnshard", "Brandon Sanderson", 4*time.Hour)}},
+	}, nil)
+
+	result := call(t, BrowseTools(svc), "get_series", map[string]any{"seriesId": "s-1"})
+
+	assertJSON(t, `{"id":"s-1","name":"Stormlight Archive","books":[
+		{"id":"b1","mediaType":"book","title":"Dawnshard","author":"Brandon Sanderson","duration":"4h 0m"}
+	]}`, result)
+}
+
+func TestGetSeries_WithoutBooksRendersEmptyList(t *testing.T) {
 	svc := NewMockBrowseService(t)
 	svc.EXPECT().Series(mock.Anything, "s-1").Return(service.SeriesDetail{ID: "s-1", Name: "Empty"}, nil)
 
 	result := call(t, BrowseTools(svc), "get_series", map[string]any{"seriesId": "s-1"})
 
-	assertJSON(t, `{"id":"s-1","name":"Empty","books":null}`, result)
+	assertJSON(t, `{"id":"s-1","name":"Empty","books":[]}`, result)
+}
+
+func TestGetSeries_Description(t *testing.T) {
+	desc := findTool(BrowseTools(NewMockBrowseService(t)), "get_series").Tool.Description
+
+	assert.Contains(t, desc, "in reading order")
+	assert.Contains(t, desc, "each with its number in the series when it has one")
+}
+
+func TestGetSeries_SeriesIDSaysWhereToFindIt(t *testing.T) {
+	seriesID := schemaOf(t, "get_series").Properties["seriesId"]
+	require.NotNil(t, seriesID)
+
+	assert.Equal(t, "Series ID (from list_series or search_library)", seriesID.Description)
 }
 
 func TestGetSeries_Errors(t *testing.T) {

@@ -48,6 +48,7 @@ func TestDefaultToolsets(t *testing.T) {
 	assert.False(t, defaults[toolsetBrowse])
 	assert.False(t, defaults[toolsetChapters])
 	assert.False(t, defaults[toolsetMetadata])
+	assert.False(t, defaults[toolsetCovers])
 }
 
 func TestResolveToolsets(t *testing.T) {
@@ -56,6 +57,34 @@ func TestResolveToolsets(t *testing.T) {
 	assert.Len(t, resolveToolsets([]string{"all"}), len(AllToolsetMetas()))
 	assert.True(t, resolveToolsets([]string{"all"})[toolsetChapters])
 	assert.True(t, resolveToolsets([]string{"all"})[toolsetMetadata])
+	assert.True(t, resolveToolsets([]string{"all"})[toolsetCovers])
 	assert.Equal(t, map[ToolsetID]bool{toolsetChapters: true}, resolveToolsets([]string{"chapters"}))
 	assert.Equal(t, map[ToolsetID]bool{toolsetMetadata: true}, resolveToolsets([]string{"metadata"}))
+	assert.Equal(t, map[ToolsetID]bool{toolsetCovers: true}, resolveToolsets([]string{"covers"}))
+}
+
+func TestToolsets_CoversOptIn(t *testing.T) {
+	assert.False(t, DefaultToolsets()[toolsetCovers], "covers is off unless asked for")
+	assert.False(t, resolveToolsets(nil)[toolsetCovers])
+	assert.True(t, resolveToolsets([]string{"all"})[toolsetCovers], "all includes covers")
+	assert.True(t, resolveToolsets([]string{"covers"})[toolsetCovers])
+	assert.Contains(t, AllToolsetMetas(), metaCovers)
+	assert.False(t, metaCovers.Default)
+
+	defaults := connectSession(t, NewServer(mockServices(t), Options{}))
+	listed, err := defaults.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	for _, tool := range listed.Tools {
+		assert.NotContains(t, []string{"search_covers", "set_cover"}, tool.Name, "the defaults leave the cover tools out")
+	}
+
+	all := connectSession(t, NewServer(mockServices(t), Options{Toolsets: []string{"all"}}))
+	listed, err = all.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	names := make([]string, 0, len(listed.Tools))
+	for _, tool := range listed.Tools {
+		names = append(names, tool.Name)
+	}
+	assert.Contains(t, names, "search_covers")
+	assert.Contains(t, names, "set_cover")
 }

@@ -92,20 +92,40 @@ type AudioTrack struct {
 	Duration    float64 `json:"duration"`
 }
 
-// BookMetadata holds metadata for a book.
+// AuthorRef names one author of a book. ID is empty for an author that does
+// not exist in the library yet; Audiobookshelf creates it from the name.
+type AuthorRef struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name"`
+}
+
+// SeriesRef places a book in a series. ID is empty for a series that does not
+// exist in the library yet; Audiobookshelf creates it from the name. Sequence
+// is free text ("1", "1.5", "0") and empty when the book has no number.
+type SeriesRef struct {
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name"`
+	Sequence string `json:"sequence,omitempty"`
+}
+
+// BookMetadata holds metadata for a book. Authors, Narrators and Series are
+// the structured lists behind AuthorName, NarratorName and SeriesName.
 type BookMetadata struct {
-	Title         string   `json:"title"`
-	Subtitle      string   `json:"subtitle,omitempty"`
-	AuthorName    string   `json:"authorName"`
-	NarratorName  string   `json:"narratorName,omitempty"`
-	SeriesName    string   `json:"seriesName,omitempty"`
-	Genres        []string `json:"genres,omitempty"`
-	Description   string   `json:"description,omitempty"`
-	PublishedYear string   `json:"publishedYear,omitempty"`
-	Publisher     string   `json:"publisher,omitempty"`
-	Language      string   `json:"language,omitempty"`
-	ISBN          string   `json:"isbn,omitempty"`
-	ASIN          string   `json:"asin,omitempty"`
+	Title         string      `json:"title"`
+	Subtitle      string      `json:"subtitle,omitempty"`
+	AuthorName    string      `json:"authorName"`
+	NarratorName  string      `json:"narratorName,omitempty"`
+	SeriesName    string      `json:"seriesName,omitempty"`
+	Authors       []AuthorRef `json:"authors,omitempty"`
+	Narrators     []string    `json:"narrators,omitempty"`
+	Series        FlexSeries  `json:"series,omitempty"`
+	Genres        []string    `json:"genres,omitempty"`
+	Description   string      `json:"description,omitempty"`
+	PublishedYear string      `json:"publishedYear,omitempty"`
+	Publisher     string      `json:"publisher,omitempty"`
+	Language      string      `json:"language,omitempty"`
+	ISBN          string      `json:"isbn,omitempty"`
+	ASIN          string      `json:"asin,omitempty"`
 }
 
 // PodcastMedia contains the media fields for a podcast library item.
@@ -190,12 +210,20 @@ type Author struct {
 	LibraryItems []LibraryItem `json:"libraryItems,omitempty"`
 }
 
-// Series represents a book series.
+// Series represents a book series. Progress is set when the request asked
+// for it with include=progress.
 type Series struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description,omitempty"`
-	Books       []LibraryItem `json:"books,omitempty"`
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Books       []LibraryItem   `json:"books,omitempty"`
+	Progress    *SeriesProgress `json:"progress,omitempty"`
+}
+
+// SeriesProgress is the block Audiobookshelf adds to a series on request
+// (include=progress). LibraryItemIDs are the IDs of the series' items.
+type SeriesProgress struct {
+	LibraryItemIDs []string `json:"libraryItemIds"`
 }
 
 // Collection represents a user-created collection.
@@ -295,11 +323,16 @@ type MediaPayload struct {
 }
 
 // MetadataPayload holds the metadata fields an update changes. A nil field is
-// not sent; a pointer to an empty list or string is sent as is.
+// not sent; a pointer to an empty list or string is sent as is. A list
+// replaces the whole list on the book: an empty Series takes the book out of
+// all its series.
 type MetadataPayload struct {
-	Genres      *[]string `json:"genres,omitempty"`
-	Language    *string   `json:"language,omitempty"`
-	Description *string   `json:"description,omitempty"`
+	Genres      *[]string    `json:"genres,omitempty"`
+	Language    *string      `json:"language,omitempty"`
+	Description *string      `json:"description,omitempty"`
+	Authors     *[]AuthorRef `json:"authors,omitempty"`
+	Narrators   *[]string    `json:"narrators,omitempty"`
+	Series      *[]SeriesRef `json:"series,omitempty"`
 }
 
 // AudibleChapters is Audible's chapter list for one edition, as Audnexus
@@ -332,4 +365,15 @@ type User struct {
 // UserPermissions lists the permissions Audiobookshelf grants a [User].
 type UserPermissions struct {
 	Update bool `json:"update"`
+	Upload bool `json:"upload"`
+}
+
+// MaxImageBytes is the largest image body the client reads: 2 MiB.
+const MaxImageBytes = 2 << 20
+
+// Image is a picture the API served, with the MIME type it announced
+// (empty when the response named none).
+type Image struct {
+	Data     []byte
+	MIMEType string
 }

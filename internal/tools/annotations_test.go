@@ -8,7 +8,10 @@ import (
 )
 
 func TestAllTools_DeclareEveryAnnotation(t *testing.T) {
-	openWorld := map[string]bool{"search_audible": true, "get_audible_chapters": true, "search_book_metadata": true}
+	openWorld := map[string]bool{
+		"search_audible": true, "get_audible_chapters": true, "search_book_metadata": true,
+		"search_covers": true, "set_cover": true,
+	}
 
 	for _, st := range AllTools(Services{}) {
 		name := st.Tool.Name

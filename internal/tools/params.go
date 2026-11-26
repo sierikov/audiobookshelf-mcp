@@ -53,10 +53,16 @@ func requiredStrings(args map[string]any, name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return stringsOf(raw), nil
+}
+
+// stringsOf returns the strings in raw, a list of arguments; an entry of
+// another type reads as "".
+func stringsOf(raw []any) []string {
 	out := make([]string, 0, len(raw))
 	for _, item := range raw {
 		s, _ := item.(string)
 		out = append(out, s)
 	}
-	return out, nil
+	return out
 }

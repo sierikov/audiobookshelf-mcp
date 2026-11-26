@@ -14,6 +14,15 @@ import (
 // Token is the bearer token the fake server accepts.
 const Token = "test-token"
 
+// Raw is a route value served as is, instead of being encoded as JSON: it
+// sets the status, content type and body of the response. A zero Status is
+// 200, and an empty ContentType leaves the header to net/http.
+type Raw struct {
+	Status      int
+	ContentType string
+	Body        []byte
+}
+
 // Server is a fake Audiobookshelf API that answers each path with canned JSON.
 type Server struct {
 	*httptest.Server
@@ -26,7 +35,8 @@ type Server struct {
 	paths    []string
 }
 
-// NewServer starts a fake API serving routes (URL path → JSON value).
+// NewServer starts a fake API serving routes (URL path → JSON value, or a
+// [Raw] response).
 // Requests without the bearer Token get 401, unknown paths get 404.
 // The server is closed when the test ends.
 func NewServer(tb testing.TB, routes map[string]any) *Server {
@@ -52,6 +62,16 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	resp, ok := s.routes[r.URL.Path]
 	if !ok {
 		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if raw, ok := resp.(Raw); ok {
+		if raw.ContentType != "" {
+			w.Header().Set("Content-Type", raw.ContentType)
+		}
+		if raw.Status != 0 {
+			w.WriteHeader(raw.Status)
+		}
+		_, _ = w.Write(raw.Body)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

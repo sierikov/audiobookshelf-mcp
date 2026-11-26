@@ -64,3 +64,30 @@ func (s *MetadataWiringSuite) TestUpdateItems_FullStack() {
 	s.resultJSON(result, &out)
 	s.Equal(1, out.Changed)
 }
+
+func (s *MetadataWiringSuite) TestUpdateItems_SeriesFullStack() {
+	s.routeSolaris()
+	s.StartServer()
+
+	result := s.callTool(s.tool("update_items"), map[string]any{
+		"items": []any{map[string]any{
+			"itemId": "li_1",
+			"series": []any{map[string]any{"name": "Holly Gibney", "sequence": "3"}},
+		}},
+	})
+
+	s.Require().False(result.IsError, resultText(result))
+	s.JSONEq(`[{"id":"li_1","mediaPayload":{"metadata":{"series":[{"name":"Holly Gibney","sequence":"3"}]}}}]`,
+		string(s.srv.LastBodyFor("/api/items/batch/update")))
+
+	var out struct {
+		Changed int `json:"changed"`
+		Items   []struct {
+			Previous map[string]any `json:"previous"`
+		} `json:"items"`
+	}
+	s.resultJSON(result, &out)
+	s.Equal(1, out.Changed)
+	s.Require().Len(out.Items, 1)
+	s.Equal([]any{}, out.Items[0].Previous["series"], "a book with no series shows [], not null")
+}

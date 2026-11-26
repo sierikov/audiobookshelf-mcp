@@ -55,6 +55,13 @@ type MetadataService interface {
 	Update(ctx context.Context, changes []service.ItemChange) (service.UpdateResult, error)
 }
 
+// CoversService is what the covers toolset needs from the service layer.
+type CoversService interface {
+	Find(ctx context.Context, itemID, provider, title, author string) (service.CoverSearch, error)
+	Show(ctx context.Context, itemID string, urls []string) (service.CoverSearch, error)
+	Set(ctx context.Context, itemID, url string) (service.CoverSet, error)
+}
+
 // Services are the services the tools call, one per toolset.
 type Services struct {
 	Libraries LibraryService
@@ -63,4 +70,5 @@ type Services struct {
 	Browse    BrowseService
 	Chapters  ChapterService
 	Metadata  MetadataService
+	Covers    CoversService
 }

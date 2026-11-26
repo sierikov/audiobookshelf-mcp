@@ -41,9 +41,12 @@ type PlaybackAPI interface {
 type BrowseAPI interface {
 	LibrarySeries(ctx context.Context, libraryID string, page abs.Page) (abs.SeriesPage, error)
 	Series(ctx context.Context, seriesID string) (abs.Series, error)
+	ItemsByID(ctx context.Context, ids []string) ([]abs.LibraryItem, error)
 	Author(ctx context.Context, authorID string) (abs.Author, error)
 	LibraryCollections(ctx context.Context, libraryID string, page abs.Page) (abs.CollectionsPage, error)
 }
+
+var _ BrowseAPI = (*abs.Client)(nil)
 
 // ChaptersAPI is the part of the Audiobookshelf API the Chapters service uses.
 type ChaptersAPI interface {
@@ -65,3 +68,13 @@ type MetadataAPI interface {
 }
 
 var _ MetadataAPI = (*abs.Client)(nil)
+
+// CoversAPI is the part of the Audiobookshelf API the Covers service uses.
+type CoversAPI interface {
+	Item(ctx context.Context, itemID string) (abs.LibraryItem, error)
+	SearchCovers(ctx context.Context, provider, title, author string) ([]string, error)
+	ItemCover(ctx context.Context, itemID string, width int) (abs.Image, error)
+	SetCoverURL(ctx context.Context, itemID, url string) error
+}
+
+var _ CoversAPI = (*abs.Client)(nil)

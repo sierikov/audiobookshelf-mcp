@@ -28,3 +28,10 @@ func additiveWriteAnnotations() *mcp.ToolAnnotations {
 func destructiveWriteAnnotations() *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{DestructiveHint: new(true), IdempotentHint: true, OpenWorldHint: new(false)}
 }
+
+// openWorldDestructiveWriteAnnotations marks a tool that replaces a stored
+// value, and has Audiobookshelf fetch the new one from a web address outside
+// it. It is idempotent because repeating a call leaves the same result.
+func openWorldDestructiveWriteAnnotations() *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{DestructiveHint: new(true), IdempotentHint: true, OpenWorldHint: new(true)}
+}
