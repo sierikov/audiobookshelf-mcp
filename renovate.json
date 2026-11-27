@@ -1,0 +1,56 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    ":semanticCommits",
+    "schedule:weekly"
+  ],
+  "timezone": "Europe/Berlin",
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodUpdateImportPaths"
+  ],
+  "packageRules": [
+    {
+      "description": "Update GoReleaser in the release workflow and the Makefile together",
+      "matchPackageNames": [
+        "goreleaser/goreleaser",
+        "github.com/goreleaser/goreleaser/v2"
+      ],
+      "groupName": "GoReleaser"
+    },
+    {
+      "description": "Keep the Docker build image and the Go toolchain on the same Go release",
+      "matchPackageNames": [
+        "go",
+        "golang"
+      ],
+      "groupName": "Go"
+    },
+    {
+      "description": "One pull request for the non-major GitHub Actions updates",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "groupName": "GitHub Actions"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Makefile$/"
+      ],
+      "matchStrings": [
+        "github\\.com/goreleaser/goreleaser/v2@(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "go",
+      "depNameTemplate": "github.com/goreleaser/goreleaser/v2"
+    }
+  ]
+}
