@@ -56,7 +56,9 @@ const geminiKeyEnv = "AUDIOBOOKSHELF_MCP_GEMINI_API_KEY"
 
 // TestManifestLetsTheUserSetTheGeminiKey keeps an extension install able to
 // turn the made-cover tools on: an optional, secret field whose value reaches
-// the server through its environment, the way the token's does.
+// the server through its environment, the way the token's does. Its default is
+// empty, so a field left blank reaches the server as no key rather than as the
+// unfilled ${user_config.gemini_api_key} placeholder.
 func TestManifestLetsTheUserSetTheGeminiKey(t *testing.T) {
 	data, err := os.ReadFile("../../manifest.json")
 	require.NoError(t, err)
@@ -75,6 +77,7 @@ func TestManifestLetsTheUserSetTheGeminiKey(t *testing.T) {
 		"type":        "string",
 		"title":       "Gemini API key (optional, paid)",
 		"description": "For making new covers with Google's Nano Banana models, about $0.07 to $0.16 a cover. Leave empty to keep made covers off.",
+		"default":     "",
 		"sensitive":   true,
 		"required":    false,
 	}, manifest.UserConfig["gemini_api_key"])
