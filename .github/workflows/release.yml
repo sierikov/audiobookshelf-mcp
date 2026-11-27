@@ -5,7 +5,8 @@ name: Release
 #   release   runs the tests, then GoReleaser (GitHub release; the cask is off), checks
 #             server.json with the MCP Registry, and uploads dist/ as an artifact
 #   npm       publishes the six npm packages
-#   registry  publishes server.json to the MCP Registry
+#   registry  waits until npm serves the version, then publishes server.json
+#             to the MCP Registry
 # "Run workflow" is always a dry run: a GoReleaser snapshot and npm publish --dry-run.
 # If a job fails, fix the cause and use "Re-run failed jobs": the jobs that passed are
 # kept, and the rest reuse the uploaded dist/, which is kept for 90 days.
@@ -183,6 +184,12 @@ jobs:
           elif [ $? -ne 1 ]; then
             exit 1
           fi
+
+      # npm serves a new version only a minute or two after the publish, and
+      # the registry refuses an npm package version that npm doesn't serve yet.
+      - name: Wait for npm to serve this version
+        if: steps.listed.outputs.found != 'true'
+        run: sh scripts/npm-wait-for-version.sh "$(jq -r '.packages[] | select(.registryType == "npm") | .identifier' dist/server.json)" "$VERSION"
 
       - name: Publish server.json
         if: steps.listed.outputs.found != 'true'
