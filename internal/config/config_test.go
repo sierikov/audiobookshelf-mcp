@@ -143,6 +143,52 @@ func TestWithEnv_EmptyEnvKeepsFileValues(t *testing.T) {
 	assert.Equal(t, file, got)
 }
 
+func TestWithEnv_GeminiKey(t *testing.T) {
+	t.Run("the server's own variable sets it", func(t *testing.T) {
+		env := map[string]string{"AUDIOBOOKSHELF_MCP_GEMINI_API_KEY": "x"}
+
+		got := Config{}.WithEnv(func(k string) string { return env[k] })
+
+		assert.Equal(t, "x", got.GeminiKey)
+	})
+	t.Run("it replaces the saved key", func(t *testing.T) {
+		env := map[string]string{"AUDIOBOOKSHELF_MCP_GEMINI_API_KEY": "from-env"}
+
+		got := Config{GeminiKey: "from-file"}.WithEnv(func(k string) string { return env[k] })
+
+		assert.Equal(t, "from-env", got.GeminiKey)
+	})
+	t.Run("an empty variable keeps the saved key", func(t *testing.T) {
+		got := Config{GeminiKey: "from-file"}.WithEnv(func(string) string { return "" })
+
+		assert.Equal(t, "from-file", got.GeminiKey)
+	})
+	t.Run("GEMINI_API_KEY is never read", func(t *testing.T) {
+		env := map[string]string{"GEMINI_API_KEY": "y"}
+
+		got := Config{}.WithEnv(func(k string) string { return env[k] })
+
+		assert.Empty(t, got.GeminiKey)
+		// Nor does it replace a key that is saved.
+		got = Config{GeminiKey: "from-file"}.WithEnv(func(k string) string { return env[k] })
+		assert.Equal(t, "from-file", got.GeminiKey)
+	})
+}
+
+func TestSaveLoad_GeminiKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	in := Config{URL: "u", Token: "t", GeminiKey: "gem"}
+
+	require.NoError(t, Save(path, in))
+
+	got, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, in, got)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is under t.TempDir()
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `"geminiApiKey": "gem"`)
+}
+
 func TestWithEnv_OnlyEmptyToolsetEntriesMeansDefaults(t *testing.T) {
 	file := Config{Toolsets: []string{"all"}}
 	env := map[string]string{"AUDIOBOOKSHELF_TOOLSETS": " , ,"}

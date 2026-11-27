@@ -143,17 +143,19 @@ type SeriesEntry struct {
 type ItemChange struct {
 	ItemID      string
 	Language    *string
+	Subtitle    *string
 	Description *string
 	Series      *[]SeriesEntry
 	Authors     *[]string
 	Narrators   *[]string
 }
 
-// ItemFields is a book's language, description, series, authors and
+// ItemFields is a book's language, subtitle, description, series, authors and
 // narrators. A nil field was not part of the change; a list that was is
 // never nil, and an empty one is a book with none.
 type ItemFields struct {
 	Language    *string
+	Subtitle    *string
 	Description *string
 	Series      *[]SeriesEntry
 	Authors     *[]string
@@ -187,6 +189,8 @@ const (
 	// MaxValueLength is the most characters a genre, tag, language, series,
 	// author or narrator written by the metadata tools may have.
 	MaxValueLength = 64
+	// MaxSubtitleLength is the most characters a new subtitle may have.
+	MaxSubtitleLength = 200
 	// MaxDescriptionLength is the most characters a new description may have.
 	MaxDescriptionLength = 10000
 	// MaxSequenceLength is the most characters a new series sequence may have.

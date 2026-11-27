@@ -47,16 +47,16 @@ func imageOf(name string) abs.Image {
 	return abs.Image{Data: slices.Concat(data[:2], comment, data[2:]), MIMEType: "image/jpeg"}
 }
 
-// currentCover is Solaris's cover as Audiobookshelf serves it.
-var currentCover = imageOf("current cover")
+// solarisCover is Solaris's cover as Audiobookshelf serves it.
+var solarisCover = imageOf("current cover")
 
-// coversAPI is a mock API for the book Solaris whose cover is currentCover
+// coversAPI is a mock API for the book Solaris whose cover is solarisCover
 // and whose search finds urls.
 func coversAPI(t *testing.T, provider string, urls []string) *MockCoversAPI {
 	t.Helper()
 	api := NewMockCoversAPI(t)
 	api.EXPECT().Item(mock.Anything, "li_1").Return(solaris(), nil)
-	api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(currentCover, nil)
+	api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(solarisCover, nil)
 	api.EXPECT().SearchCovers(mock.Anything, provider, "Солярис", "Станислав Лем").Return(urls, nil)
 	return api
 }
@@ -94,15 +94,15 @@ func TestFind_DefaultsToBookTitleAndAuthor(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			api := NewMockCoversAPI(t)
 			api.EXPECT().Item(mock.Anything, "li_1").Return(solaris(), nil)
-			api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(currentCover, nil)
+			api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(solarisCover, nil)
 			api.EXPECT().SearchCovers(mock.Anything, tt.wantProvider, tt.wantTitle, tt.wantAuthor).Return(nil, nil)
 
-			got, err := NewCovers(api, NewMockImageFetcher(t)).Find(t.Context(), "li_1", tt.provider, tt.title, tt.author)
+			got, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Find(t.Context(), "li_1", tt.provider, tt.title, tt.author)
 
 			require.NoError(t, err)
 			assert.Equal(t, CoverSearch{
 				ItemID: "li_1", Title: "Солярис", Author: "Станислав Лем", Provider: tt.wantProvider,
-				Current: &currentCover, Candidates: []CoverCandidate{},
+				Current: &solarisCover, Candidates: []CoverCandidate{},
 			}, got)
 		})
 	}
@@ -110,7 +110,7 @@ func TestFind_DefaultsToBookTitleAndAuthor(t *testing.T) {
 
 func TestFind_UnknownProviderIsRefusedBeforeAnyCall(t *testing.T) {
 	// A mock with no expectations fails the test on any call.
-	_, err := NewCovers(NewMockCoversAPI(t), NewMockImageFetcher(t)).Find(t.Context(), "li_1", "goodreads", "", "")
+	_, err := NewCovers(NewMockCoversAPI(t), NewMockImageFetcher(t), "https://abs.example").Find(t.Context(), "li_1", "goodreads", "", "")
 
 	require.ErrorIs(t, err, ErrUnknownProvider)
 	assert.ErrorContains(t, err, "fantlab, google, audible, openlibrary, itunes")
@@ -124,7 +124,7 @@ func TestFind_CurrentCoverMissingIsNotAnError(t *testing.T) {
 	urls := coverURLs(2)
 	api.EXPECT().SearchCovers(mock.Anything, "google", "Солярис", "Станислав Лем").Return(urls, nil)
 
-	got, err := NewCovers(api, fetchesEvery(t, urls, nil)).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(api, fetchesEvery(t, urls, nil), "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	assert.Nil(t, got.Current)
@@ -150,7 +150,7 @@ func TestFind_CurrentCoverThatCannotBeReadIsNotFatal(t *testing.T) {
 			urls := coverURLs(2)
 			api.EXPECT().SearchCovers(mock.Anything, "google", "Солярис", "Станислав Лем").Return(urls, nil)
 
-			got, err := NewCovers(api, fetchesEvery(t, urls, nil)).Find(t.Context(), "li_1", "google", "", "")
+			got, err := NewCovers(api, fetchesEvery(t, urls, nil), "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 			require.NoError(t, err)
 			assert.Nil(t, got.Current)
@@ -163,7 +163,7 @@ func TestFind_CurrentCoverThatCannotBeReadIsNotFatal(t *testing.T) {
 
 func TestFind_NoProblemWhenTheCurrentCoverIsThereOrMissing(t *testing.T) {
 	t.Run("there", func(t *testing.T) {
-		got, err := NewCovers(coversAPI(t, "google", nil), NewMockImageFetcher(t)).Find(t.Context(), "li_1", "google", "", "")
+		got, err := NewCovers(coversAPI(t, "google", nil), NewMockImageFetcher(t), "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 		require.NoError(t, err)
 		assert.NotNil(t, got.Current)
@@ -175,7 +175,7 @@ func TestFind_NoProblemWhenTheCurrentCoverIsThereOrMissing(t *testing.T) {
 		api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(abs.Image{}, &abs.StatusError{StatusCode: 404})
 		api.EXPECT().SearchCovers(mock.Anything, "google", "Солярис", "Станислав Лем").Return(nil, nil)
 
-		got, err := NewCovers(api, NewMockImageFetcher(t)).Find(t.Context(), "li_1", "google", "", "")
+		got, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 		require.NoError(t, err)
 		assert.Nil(t, got.Current)
@@ -196,7 +196,7 @@ func TestFind_CurrentCoverOtherErrorsFailTheSearch(t *testing.T) {
 			api.EXPECT().Item(mock.Anything, "li_1").Return(solaris(), nil)
 			api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(abs.Image{}, apiErr)
 
-			_, err := NewCovers(api, NewMockImageFetcher(t)).Find(t.Context(), "li_1", "google", "", "")
+			_, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 			assert.Equal(t, apiErr, err)
 		})
@@ -211,7 +211,7 @@ func TestFind_CapsAndKeepsOrder(t *testing.T) {
 		time.Sleep(time.Duration(MaxCoverCandidates-i) * 10 * time.Millisecond)
 	})
 
-	got, err := NewCovers(api, fetch).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(api, fetch, "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	require.Len(t, got.Candidates, MaxCoverCandidates)
@@ -241,7 +241,7 @@ func TestFind_FetchesPreviewsConcurrently(t *testing.T) {
 		}
 	})
 
-	got, err := NewCovers(coversAPI(t, "google", urls), fetch).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(coversAPI(t, "google", urls), fetch, "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	require.Len(t, got.Candidates, len(urls))
@@ -266,7 +266,7 @@ func TestFind_CandidateProblemsDontFailTheSearch(t *testing.T) {
 		}
 	}
 
-	got, err := NewCovers(api, fetch).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(api, fetch, "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	require.Len(t, got.Candidates, 5)
@@ -285,7 +285,7 @@ func TestFind_CandidateProblemsDontFailTheSearch(t *testing.T) {
 			assert.Empty(t, c.Problem)
 		}
 	}
-	assert.Equal(t, &currentCover, got.Current, "the current cover is still there")
+	assert.Equal(t, &solarisCover, got.Current, "the current cover is still there")
 }
 
 func TestFind_RefusesNonWebCandidateURL(t *testing.T) {
@@ -293,7 +293,7 @@ func TestFind_RefusesNonWebCandidateURL(t *testing.T) {
 	fetch := NewMockImageFetcher(t) // only the second URL may be fetched
 	fetch.EXPECT().Fetch(mock.Anything, urls[1]).Return(imageOf("ok"), nil)
 
-	got, err := NewCovers(coversAPI(t, "google", urls), fetch).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(coversAPI(t, "google", urls), fetch, "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	cover := imageOf("ok")
@@ -334,7 +334,7 @@ func TestFind_ShowsARefusedCandidateURLQuotedAndCut(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// The fetcher mock has no expectations, so any fetch fails the test.
-			got, err := NewCovers(coversAPI(t, "google", []string{tt.url}), NewMockImageFetcher(t)).Find(t.Context(), "li_1", "google", "", "")
+			got, err := NewCovers(coversAPI(t, "google", []string{tt.url}), NewMockImageFetcher(t), "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 			require.NoError(t, err)
 			assert.Equal(t, []CoverCandidate{{URL: tt.want, Problem: "not an http or https URL"}}, got.Candidates)
@@ -388,7 +388,7 @@ func TestFind_PodcastIsBooksOnly(t *testing.T) {
 	api := NewMockCoversAPI(t) // neither the cover nor the search is asked for
 	api.EXPECT().Item(mock.Anything, "li_1").Return(podcastItem("li_1", "Show", "Host", 3), nil)
 
-	_, err := NewCovers(api, NewMockImageFetcher(t)).Find(t.Context(), "li_1", "google", "", "")
+	_, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.ErrorIs(t, err, ErrBooksOnly)
 }
@@ -398,17 +398,17 @@ func TestFind_APIErrors(t *testing.T) {
 		api := NewMockCoversAPI(t)
 		api.EXPECT().Item(mock.Anything, "li_1").Return(abs.LibraryItem{}, errAPI)
 
-		_, err := NewCovers(api, NewMockImageFetcher(t)).Find(t.Context(), "li_1", "google", "", "")
+		_, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 		assert.Equal(t, errAPI, err)
 	})
 	t.Run("search", func(t *testing.T) {
 		api := NewMockCoversAPI(t)
 		api.EXPECT().Item(mock.Anything, "li_1").Return(solaris(), nil)
-		api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(currentCover, nil)
+		api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(solarisCover, nil)
 		api.EXPECT().SearchCovers(mock.Anything, "google", "Солярис", "Станислав Лем").Return(nil, errAPI)
 
-		_, err := NewCovers(api, NewMockImageFetcher(t)).Find(t.Context(), "li_1", "google", "", "")
+		_, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 		assert.Equal(t, errAPI, err)
 	})
@@ -424,7 +424,7 @@ func TestFind_CancelledContextFailsTheSearch(t *testing.T) {
 		return abs.Image{}, ctx.Err()
 	})
 
-	_, err := NewCovers(api, fetch).Find(ctx, "li_1", "google", "", "")
+	_, err := NewCovers(api, fetch, "https://abs.example").Find(ctx, "li_1", "google", "", "")
 
 	require.ErrorIs(t, err, context.Canceled)
 }
@@ -466,7 +466,7 @@ func TestProblemOf(t *testing.T) {
 }
 
 func TestFind_NoResultsIsAnEmptyList(t *testing.T) {
-	got, err := NewCovers(coversAPI(t, "google", nil), NewMockImageFetcher(t)).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(coversAPI(t, "google", nil), NewMockImageFetcher(t), "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	assert.NotNil(t, got.Candidates)
@@ -477,14 +477,14 @@ func TestShow_ShowsTheGivenCoversNextToTheCurrentOne(t *testing.T) {
 	urls := coverURLs(2)
 	api := NewMockCoversAPI(t) // no search: the covers are given
 	api.EXPECT().Item(mock.Anything, "li_1").Return(solaris(), nil)
-	api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(currentCover, nil)
+	api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(solarisCover, nil)
 
-	got, err := NewCovers(api, fetchesEvery(t, urls, nil)).Show(t.Context(), "li_1", urls)
+	got, err := NewCovers(api, fetchesEvery(t, urls, nil), "https://abs.example").Show(t.Context(), "li_1", urls)
 
 	require.NoError(t, err)
 	first, second := imageOf(urls[0]), imageOf(urls[1])
 	assert.Equal(t, CoverSearch{
-		ItemID: "li_1", Title: "Солярис", Author: "Станислав Лем", Provider: WebSource, Current: &currentCover,
+		ItemID: "li_1", Title: "Солярис", Author: "Станислав Лем", Provider: WebSource, Current: &solarisCover,
 		Candidates: []CoverCandidate{{URL: urls[0], Image: &first}, {URL: urls[1], Image: &second}},
 	}, got)
 }
@@ -492,7 +492,7 @@ func TestShow_ShowsTheGivenCoversNextToTheCurrentOne(t *testing.T) {
 func TestShow_RefusesNoneOrTooManyCoversBeforeAnyCall(t *testing.T) {
 	for _, n := range []int{0, MaxCoverCandidates + 1} {
 		// Mocks with no expectations fail the test on any call.
-		_, err := NewCovers(NewMockCoversAPI(t), NewMockImageFetcher(t)).Show(t.Context(), "li_1", coverURLs(n))
+		_, err := NewCovers(NewMockCoversAPI(t), NewMockImageFetcher(t), "https://abs.example").Show(t.Context(), "li_1", coverURLs(n))
 
 		require.ErrorIs(t, err, ErrCoverURLCount, "%d covers", n)
 		assert.ErrorContains(t, err, fmt.Sprintf("give 1 to %d cover URLs, not %d", MaxCoverCandidates, n))
@@ -502,10 +502,10 @@ func TestShow_RefusesNoneOrTooManyCoversBeforeAnyCall(t *testing.T) {
 func TestShow_RefusesANonWebURLAsAProblem(t *testing.T) {
 	api := NewMockCoversAPI(t)
 	api.EXPECT().Item(mock.Anything, "li_1").Return(solaris(), nil)
-	api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(currentCover, nil)
+	api.EXPECT().ItemCover(mock.Anything, "li_1", CurrentCoverWidth).Return(solarisCover, nil)
 
 	// The fetcher is never asked: a file URL is refused before it.
-	got, err := NewCovers(api, NewMockImageFetcher(t)).Show(t.Context(), "li_1", []string{"file:///etc/passwd"})
+	got, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Show(t.Context(), "li_1", []string{"file:///etc/passwd"})
 
 	require.NoError(t, err)
 	assert.Equal(t, []CoverCandidate{{URL: `"file:///etc/passwd"`, Problem: ErrNotWebURL.Error()}}, got.Candidates)
@@ -515,7 +515,7 @@ func TestShow_PodcastIsBooksOnly(t *testing.T) {
 	api := NewMockCoversAPI(t)
 	api.EXPECT().Item(mock.Anything, "li_1").Return(podcastItem("li_1", "Show", "Host", 3), nil)
 
-	_, err := NewCovers(api, NewMockImageFetcher(t)).Show(t.Context(), "li_1", coverURLs(1))
+	_, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Show(t.Context(), "li_1", coverURLs(1))
 
 	require.ErrorIs(t, err, ErrBooksOnly)
 }
@@ -525,7 +525,7 @@ func TestSet(t *testing.T) {
 	api.EXPECT().Item(mock.Anything, "li_1").Return(solaris(), nil)
 	api.EXPECT().SetCoverURL(mock.Anything, "li_1", "https://img.example/cover-2.jpg").Return(nil)
 
-	got, err := NewCovers(api, NewMockImageFetcher(t)).Set(t.Context(), "li_1", "https://img.example/cover-2.jpg")
+	got, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Set(t.Context(), "li_1", "https://img.example/cover-2.jpg")
 
 	require.NoError(t, err)
 	assert.Equal(t, CoverSet{ItemID: "li_1", Title: "Солярис"}, got)
@@ -537,7 +537,7 @@ func TestSet_ForbiddenIsAMissingPermission(t *testing.T) {
 	api.EXPECT().SetCoverURL(mock.Anything, "li_1", "https://img.example/cover-2.jpg").
 		Return(&abs.StatusError{StatusCode: 403, Body: "<html><body>Forbidden: secret-detail</body></html>"})
 
-	_, err := NewCovers(api, NewMockImageFetcher(t)).Set(t.Context(), "li_1", "https://img.example/cover-2.jpg")
+	_, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Set(t.Context(), "li_1", "https://img.example/cover-2.jpg")
 
 	require.ErrorIs(t, err, ErrNoCoverPermission)
 	require.ErrorContains(t, err, "Update and Upload permissions")
@@ -551,7 +551,7 @@ func TestSet_OtherErrorsPassThroughWrapped(t *testing.T) {
 	api.EXPECT().SetCoverURL(mock.Anything, "li_1", "https://img.example/cover-2.jpg").
 		Return(&abs.StatusError{StatusCode: 500, Body: "boom"})
 
-	_, err := NewCovers(api, NewMockImageFetcher(t)).Set(t.Context(), "li_1", "https://img.example/cover-2.jpg")
+	_, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Set(t.Context(), "li_1", "https://img.example/cover-2.jpg")
 
 	var status *abs.StatusError
 	require.ErrorAs(t, err, &status)
@@ -568,7 +568,7 @@ func TestSet_RefusesNonWebURL(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("%.60q", u), func(t *testing.T) {
 			// A mock with no expectations fails the test on any API call.
-			_, err := NewCovers(NewMockCoversAPI(t), NewMockImageFetcher(t)).Set(t.Context(), "li_1", u)
+			_, err := NewCovers(NewMockCoversAPI(t), NewMockImageFetcher(t), "https://abs.example").Set(t.Context(), "li_1", u)
 
 			require.ErrorIs(t, err, ErrNotWebURL)
 		})
@@ -579,7 +579,7 @@ func TestSet_PodcastIsBooksOnly(t *testing.T) {
 	api := NewMockCoversAPI(t) // SetCoverURL is not expected
 	api.EXPECT().Item(mock.Anything, "li_1").Return(podcastItem("li_1", "Show", "Host", 3), nil)
 
-	_, err := NewCovers(api, NewMockImageFetcher(t)).Set(t.Context(), "li_1", "https://img.example/cover-2.jpg")
+	_, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Set(t.Context(), "li_1", "https://img.example/cover-2.jpg")
 
 	require.ErrorIs(t, err, ErrBooksOnly)
 }
@@ -588,7 +588,7 @@ func TestSet_ItemError(t *testing.T) {
 	api := NewMockCoversAPI(t)
 	api.EXPECT().Item(mock.Anything, "li_1").Return(abs.LibraryItem{}, errAPI)
 
-	_, err := NewCovers(api, NewMockImageFetcher(t)).Set(t.Context(), "li_1", "https://img.example/cover-2.jpg")
+	_, err := NewCovers(api, NewMockImageFetcher(t), "https://abs.example").Set(t.Context(), "li_1", "https://img.example/cover-2.jpg")
 
 	assert.Equal(t, errAPI, err)
 }

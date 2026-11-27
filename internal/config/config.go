@@ -25,6 +25,11 @@ const (
 	envURL      = "AUDIOBOOKSHELF_URL"
 	envToken    = "AUDIOBOOKSHELF_TOKEN"
 	envToolsets = "AUDIOBOOKSHELF_TOOLSETS"
+	// envGeminiKey is the server's own name for the Gemini API key. The
+	// GEMINI_API_KEY that other tools read is left alone on purpose: a key that
+	// pays for images should not switch on in this server because a different
+	// program wanted it.
+	envGeminiKey = "AUDIOBOOKSHELF_MCP_GEMINI_API_KEY"
 )
 
 // Config is the content of the settings file.
@@ -35,6 +40,9 @@ type Config struct {
 	Token string `json:"token"`
 	// Toolsets names the toolsets to enable. Empty means the defaults.
 	Toolsets []string `json:"toolsets,omitempty"`
+	// GeminiKey is the Google Gemini API key that pays for made covers. Empty
+	// means the server does not offer the tools that make them.
+	GeminiKey string `json:"geminiApiKey,omitempty"`
 }
 
 // Path returns the location of the settings file. On Windows it lives under
@@ -105,10 +113,11 @@ func Save(path string, c Config) error {
 	return nil
 }
 
-// WithEnv returns c with the AUDIOBOOKSHELF_URL, AUDIOBOOKSHELF_TOKEN and
-// AUDIOBOOKSHELF_TOOLSETS environment variables applied on top. A non-empty
-// variable replaces the settings-file value; AUDIOBOOKSHELF_TOOLSETS is a
-// comma-separated list whose blank entries are dropped.
+// WithEnv returns c with the AUDIOBOOKSHELF_URL, AUDIOBOOKSHELF_TOKEN,
+// AUDIOBOOKSHELF_TOOLSETS and AUDIOBOOKSHELF_MCP_GEMINI_API_KEY environment
+// variables applied on top. A non-empty variable replaces the settings-file
+// value; AUDIOBOOKSHELF_TOOLSETS is a comma-separated list whose blank entries
+// are dropped. GEMINI_API_KEY is never read.
 func (c Config) WithEnv(getenv func(string) string) Config {
 	if v := getenv(envURL); v != "" {
 		c.URL = v
@@ -118,6 +127,9 @@ func (c Config) WithEnv(getenv func(string) string) Config {
 	}
 	if v := getenv(envToolsets); v != "" {
 		c.Toolsets = SplitList(v)
+	}
+	if v := getenv(envGeminiKey); v != "" {
+		c.GeminiKey = v
 	}
 	return c
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/sierikov/audiobookshelf-mcp/internal/agents"
 	"github.com/sierikov/audiobookshelf-mcp/internal/buildinfo"
 	"github.com/sierikov/audiobookshelf-mcp/internal/config"
+	"github.com/sierikov/audiobookshelf-mcp/internal/gemini"
 	"github.com/sierikov/audiobookshelf-mcp/internal/service"
 	"github.com/sierikov/audiobookshelf-mcp/internal/setup"
 	"github.com/sierikov/audiobookshelf-mcp/internal/tools"
@@ -66,6 +67,9 @@ const setupUsage = `usage: audiobookshelf-mcp setup [flags]
 
 Checks your Audiobookshelf URL and token, saves them, and adds this server to
 the AI agents found on this machine. It asks for whatever the flags leave out.
+With covers on, it also asks for a Gemini API key, which pays for made covers
+(about $0.07 to $0.16 a cover). No flag takes the key: a flag shows in the
+process list.
 
 flags:
 `
@@ -136,15 +140,8 @@ func serve(ctx context.Context) error {
 	ver := buildinfo.Version()
 	checker, _ := newChecker(ver, os.Getenv) // nil when the update check is off
 	client := abs.NewClient(cfg.URL, cfg.Token)
-	server := tools.NewServer(tools.Services{
-		Libraries: service.NewLibraries(client),
-		Items:     service.NewItems(client),
-		Playback:  service.NewPlayback(client),
-		Browse:    service.NewBrowse(client),
-		Chapters:  service.NewChapters(client),
-		Metadata:  service.NewMetadata(client),
-		Covers:    service.NewCovers(client, service.NewImageFetcher()),
-	}, tools.Options{Version: ver, Toolsets: cfg.Toolsets, Instructions: updateInstructions(checker)})
+	server := tools.NewServer(newServices(cfg, client),
+		tools.Options{Version: ver, Toolsets: cfg.Toolsets, Instructions: updateInstructions(checker)})
 
 	if checker != nil {
 		// The answer is only for the next start, so its error has nowhere to go.
@@ -156,6 +153,27 @@ func serve(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// newServices builds the services the tools call, backed by client. The tools
+// that make covers cost money, so their service exists only when cfg has a
+// Gemini API key. It is built inside the check and never assigned from a
+// variable: a nil *service.CoverArt in the interface would not be nil, and
+// would offer the paid tools without a key.
+func newServices(cfg config.Config, client *abs.Client) tools.Services {
+	svcs := tools.Services{
+		Libraries: service.NewLibraries(client),
+		Items:     service.NewItems(client),
+		Playback:  service.NewPlayback(client),
+		Browse:    service.NewBrowse(client),
+		Chapters:  service.NewChapters(client),
+		Metadata:  service.NewMetadata(client),
+		Covers:    service.NewCovers(client, service.NewImageFetcher(), cfg.URL),
+	}
+	if cfg.GeminiKey != "" {
+		svcs.CoverArt = service.NewCoverArt(client, gemini.NewClient(gemini.DefaultBaseURL, cfg.GeminiKey))
+	}
+	return svcs
 }
 
 // notConfiguredError is the error for a server without settings. When the
@@ -283,9 +301,9 @@ func checkToolsets(names []string) error {
 }
 
 // setupDeps wires the setup flow to this machine: the real settings file, the
-// real agents and Audiobookshelf, the command that agents will run, and the
-// process environment. stderr receives the line break when Ctrl-C stops the
-// hidden token prompt.
+// real agents, Audiobookshelf and Google, the command that agents will run,
+// and the process environment. stderr receives the line break when Ctrl-C
+// stops a hidden prompt.
 func setupDeps(stdin io.Reader, stderr io.Writer) (setup.Deps, error) {
 	cfgPath, err := config.Path()
 	if err != nil {
@@ -300,21 +318,31 @@ func setupDeps(stdin io.Reader, stderr io.Writer) (setup.Deps, error) {
 		return setup.Deps{}, fmt.Errorf("locating this program: %w", err)
 	}
 	return setup.Deps{
-		ConfigPath: cfgPath,
-		Agents:     agents.All(env),
-		Verify:     setup.VerifyWith,
-		Entry:      setup.EntryFor(method, exe, buildinfo.Version()),
-		ReadSecret: secretReader(stdin, stderr),
-		Getenv:     os.Getenv,
+		ConfigPath:     cfgPath,
+		Agents:         agents.All(env),
+		Verify:         setup.VerifyWith,
+		CheckGeminiKey: geminiKeyChecker(gemini.DefaultBaseURL),
+		Entry:          setup.EntryFor(method, exe, buildinfo.Version()),
+		ReadSecret:     secretReader(stdin, stderr),
+		Getenv:         os.Getenv,
 	}, nil
 }
 
-// secretReader returns the function that reads the token without echoing it,
-// or nil when stdin is not a terminal. A pipe or a file has nothing to hide,
-// and setup reads the token as a plain line from the same buffered reader as
-// its other answers; reading around that buffer would lose input.
+// geminiKeyChecker returns the function setup uses to check a Gemini API key
+// against the Gemini API at baseURL. The check is free.
+func geminiKeyChecker(baseURL string) func(ctx context.Context, key string) error {
+	return func(ctx context.Context, key string) error {
+		return gemini.NewClient(baseURL, key).CheckKey(ctx)
+	}
+}
+
+// secretReader returns the function that reads the token, and the Gemini key,
+// without echoing them, or nil when stdin is not a terminal. A pipe or a file
+// has nothing to hide, and setup reads them as plain lines from the same
+// buffered reader as its other answers; reading around that buffer would lose
+// input.
 //
-// The terminal does not echo while the token is read. Ctrl-C at that prompt
+// The terminal does not echo while a secret is read. Ctrl-C at that prompt
 // would leave it so, so the reader catches the interrupt itself: it restores
 // the terminal, ends the prompt line on stderr and exits with
 // exitInterrupted.

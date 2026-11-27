@@ -7,12 +7,14 @@ import (
 	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/sierikov/audiobookshelf-mcp/internal/abs/abstest"
+	"github.com/sierikov/audiobookshelf-mcp/internal/service"
 )
 
 type CoversWiringSuite struct {
@@ -158,4 +160,65 @@ func (s *CoversWiringSuite) TestSetCover_ForbiddenFullStack() {
 	result := s.callTool(s.tool("set_cover"), map[string]any{"itemId": "li_1", "url": "https://img.example/holly.jpg"})
 
 	assertToolError(s.T(), "failed to set cover: the Audiobookshelf user needs the Update and Upload permissions", result)
+}
+
+func (s *CoversWiringSuite) TestGetCoverPrompt_FullStack() {
+	item := abstest.BookItemFull("li_1", map[string]any{
+		"title": "Holly", "authorName": "Stephen King", "genres": []any{"Horror", "Thriller"},
+	}, 3600)
+	item["libraryId"] = "lib_1"
+	s.routes["/api/items/li_1"] = item
+	// A book-shaped library, which this server ignores: audiobook covers are square.
+	s.routes["/api/libraries/lib_1"] = map[string]any{"id": "lib_1", "name": "Audiobooks", "settings": map[string]any{"coverAspectRatio": 0}}
+	s.StartServer()
+
+	result := s.callTool(s.tool("get_cover_prompt"), map[string]any{"itemId": "li_1", "style": "Moody watercolour", "premise": "A town in winter."})
+
+	s.Require().False(result.IsError, resultText(result))
+	var out struct {
+		Prompt, AspectRatio, BookPage string
+		Edit                          bool
+	}
+	s.resultJSON(result, &out)
+	s.Equal("1:1", out.AspectRatio, "always square")
+	s.Equal(s.srv.URL+"/item/li_1", out.BookPage, "the page of the book on the server the client talks to")
+	s.False(out.Edit)
+	s.Contains(out.Prompt, "Genre: Horror, Thriller.\nPremise: A town in winter.\nStyle: Moody watercolour\n")
+	s.True(strings.HasSuffix(out.Prompt, "\nThe cover is square."))
+	// The item only: no library is read, and no image is fetched.
+	s.Equal("/api/items/li_1", s.srv.LastRequest().URL.Path)
+	s.Nil(s.srv.LastBodyFor("/api/libraries/lib_1"))
+}
+
+func (s *CoversWiringSuite) TestGetCoverPrompt_CleanFullStack() {
+	item := abstest.BookItem("li_1", "Holly", "Stephen King", 3600)
+	item["libraryId"] = "lib_1"
+	s.routes["/api/items/li_1"] = item
+	s.routes["/api/libraries/lib_1"] = map[string]any{"id": "lib_1", "name": "Audiobooks", "settings": map[string]any{"coverAspectRatio": 0}}
+	s.StartServer()
+
+	result := s.callTool(s.tool("get_cover_prompt"), map[string]any{"itemId": "li_1", "instructions": "remove the store label at the bottom"})
+
+	s.Require().False(result.IsError, resultText(result))
+	var out struct {
+		Prompt, AspectRatio string
+		Edit                bool
+	}
+	s.resultJSON(result, &out)
+	s.True(out.Edit)
+	s.Equal("1:1", out.AspectRatio, "always square")
+	s.True(strings.HasPrefix(out.Prompt, "Edit this audiobook cover: remove the store label at the bottom\n"))
+	s.True(strings.HasSuffix(out.Prompt, "\nMake the cover square, extending the background so that nothing is cut off or stretched."))
+	s.NotContains(out.Prompt, "The cover is", "the edit line takes the place of the shape line")
+	// The item only: the library is not read.
+	s.Equal("/api/items/li_1", s.srv.LastRequest().URL.Path)
+	s.Nil(s.srv.LastBodyFor("/api/libraries/lib_1"))
+}
+
+func (s *CoversWiringSuite) TestGetCoverPrompt_BothStyleAndInstructionsFullStack() {
+	s.StartServer()
+
+	result := s.callTool(s.tool("get_cover_prompt"), map[string]any{"itemId": "li_1", "style": "noir", "instructions": "remove the label"})
+
+	assertToolError(s.T(), "failed to write the cover prompt: "+service.ErrStyleOrInstructions.Error(), result)
 }

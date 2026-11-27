@@ -38,7 +38,7 @@ var (
 	metaBrowse    = ToolsetMeta{toolsetBrowse, "Browse series, authors, collections", false}
 	metaChapters  = ToolsetMeta{toolsetChapters, "Find, fix and save audiobook chapters (includes writes)", false}
 	metaMetadata  = ToolsetMeta{toolsetMetadata, "Survey and fix genres, tags, language and descriptions (includes writes)", false}
-	metaCovers    = ToolsetMeta{toolsetCovers, "Find and set book covers (includes writes)", false}
+	metaCovers    = ToolsetMeta{toolsetCovers, "Find, make and set book covers (includes writes; making covers costs money)", false}
 )
 
 // AllToolsetMetas returns all defined toolset metadata.

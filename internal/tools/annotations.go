@@ -35,3 +35,11 @@ func destructiveWriteAnnotations() *mcp.ToolAnnotations {
 func openWorldDestructiveWriteAnnotations() *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{DestructiveHint: new(true), IdempotentHint: true, OpenWorldHint: new(true)}
 }
+
+// openWorldCostAnnotations marks a tool that asks a paid service outside
+// Audiobookshelf, Google's image model, to make something new. It changes
+// nothing that is stored, so it is not destructive, but it is not idempotent
+// either: each call makes, and is charged for, new images.
+func openWorldCostAnnotations() *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: new(false), IdempotentHint: false, OpenWorldHint: new(true)}
+}

@@ -199,6 +199,72 @@ func TestUpdateItems(t *testing.T) {
 	}`, result)
 }
 
+func TestUpdateItems_Subtitle(t *testing.T) {
+	svc := NewMockMetadataService(t)
+	svc.EXPECT().Update(mock.Anything, []service.ItemChange{
+		{ItemID: "li_1", Subtitle: new("Роман")},
+		{ItemID: "li_2", Subtitle: new("")},
+		{ItemID: "li_3", Language: new("Russian")},
+	}).Return(service.UpdateResult{
+		Changed: 3,
+		Items: []service.ItemUpdateResult{
+			{ItemID: "li_1", Title: "Dune", Previous: service.ItemFields{Subtitle: new("")}, Now: service.ItemFields{Subtitle: new("Роман")}},
+			{ItemID: "li_2", Title: "Emma", Previous: service.ItemFields{Subtitle: new("[роман]")}, Now: service.ItemFields{Subtitle: new("")}},
+			{ItemID: "li_3", Title: "Solaris", Previous: service.ItemFields{Language: new("")}, Now: service.ItemFields{Language: new("Russian")}},
+		},
+	}, nil)
+
+	result := call(t, MetadataTools(svc), "update_items", map[string]any{"items": []any{
+		map[string]any{"itemId": "li_1", "subtitle": "Роман"},
+		map[string]any{"itemId": "li_2", "subtitle": ""},
+		map[string]any{"itemId": "li_3", "language": "Russian"},
+	}})
+
+	assertJSON(t, `{
+		"changed":3,
+		"items":[
+			{"itemId":"li_1","title":"Dune","previous":{"subtitle":""},"now":{"subtitle":"Роман"}},
+			{"itemId":"li_2","title":"Emma","previous":{"subtitle":"[роман]"},"now":{"subtitle":""}},
+			{"itemId":"li_3","title":"Solaris","previous":{"language":""},"now":{"language":"Russian"}}
+		]
+	}`, result)
+}
+
+func TestUpdateItems_SubtitleSchema(t *testing.T) {
+	st := findTool(AllTools(Services{}), "update_items")
+	require.NotNil(t, st)
+	item := schemaOf(t, "update_items").Properties["items"].Items
+
+	subtitle := item.Properties["subtitle"]
+	require.NotNil(t, subtitle)
+	assert.Equal(t, "string", subtitle.Type)
+	assert.Equal(t, "The book's subtitle, at most 200 characters; an empty string removes it", subtitle.Description)
+	assert.Equal(t, 200, service.MaxSubtitleLength)
+	// A value equal to the stored one passes at any length, so the limit is in
+	// the service and the text, not the schema.
+	assert.Nil(t, subtitle.MaxLength)
+	assert.Equal(t, []string{"itemId"}, item.Required, "a subtitle is optional")
+
+	resolved, err := inputSchema(&st.Tool)
+	require.NoError(t, err)
+	valid := func(value any) error {
+		return resolved.Validate(map[string]any{"items": []any{map[string]any{"itemId": "li_1", "subtitle": value}}})
+	}
+	require.NoError(t, valid("Роман"))
+	require.NoError(t, valid(""), "an empty string removes the subtitle")
+	require.NoError(t, valid(strings.Repeat("a", 300)), "an over-long value is for the service to judge")
+	require.Error(t, valid(nil), "null is not how a subtitle is removed")
+	require.Error(t, valid(1))
+}
+
+func TestUpdateItems_DescriptionSaysHowToSetASubtitle(t *testing.T) {
+	st := findTool(MetadataTools(NewMockMetadataService(t)), "update_items")
+	require.NotNil(t, st)
+
+	assert.True(t, strings.HasPrefix(st.Tool.Description, "Set the language, subtitle, description, series, authors and/or narrators of one or more books"))
+	assert.Contains(t, st.Tool.Description, "subtitle replaces the book's subtitle; an empty string removes it.")
+}
+
 func TestUpdateItems_BadArguments(t *testing.T) {
 	tools := MetadataTools(NewMockMetadataService(t))
 

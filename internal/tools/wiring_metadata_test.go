@@ -65,6 +65,35 @@ func (s *MetadataWiringSuite) TestUpdateItems_FullStack() {
 	s.Equal(1, out.Changed)
 }
 
+func (s *MetadataWiringSuite) TestUpdateItems_SubtitleFullStack() {
+	// A book with a junk subtitle, which the user wants gone.
+	s.routes["/api/items/batch/get"] = map[string]any{"libraryItems": []any{map[string]any{
+		"id": "li_1", "mediaType": "book",
+		"media": map[string]any{"metadata": map[string]any{"title": "Солярис", "subtitle": "[роман]"}},
+	}}}
+	s.routes["/api/items/batch/update"] = map[string]any{"success": true, "updates": 1}
+	s.StartServer()
+
+	result := s.callTool(s.tool("update_items"), map[string]any{
+		"items": []any{map[string]any{"itemId": "li_1", "subtitle": ""}},
+	})
+
+	s.Require().False(result.IsError, resultText(result))
+	s.JSONEq(`[{"id":"li_1","mediaPayload":{"metadata":{"subtitle":""}}}]`,
+		string(s.srv.LastBodyFor("/api/items/batch/update")), "a removed subtitle goes out as an empty string, and nothing else")
+
+	var out struct {
+		Changed int `json:"changed"`
+		Items   []struct {
+			Previous map[string]any `json:"previous"`
+		} `json:"items"`
+	}
+	s.resultJSON(result, &out)
+	s.Equal(1, out.Changed)
+	s.Require().Len(out.Items, 1)
+	s.Equal(map[string]any{"subtitle": "[роман]"}, out.Items[0].Previous, "the subtitle that was there, and no other field")
+}
+
 func (s *MetadataWiringSuite) TestUpdateItems_SeriesFullStack() {
 	s.routeSolaris()
 	s.StartServer()

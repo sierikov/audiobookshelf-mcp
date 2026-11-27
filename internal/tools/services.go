@@ -60,9 +60,23 @@ type CoversService interface {
 	Find(ctx context.Context, itemID, provider, title, author string) (service.CoverSearch, error)
 	Show(ctx context.Context, itemID string, urls []string) (service.CoverSearch, error)
 	Set(ctx context.Context, itemID, url string) (service.CoverSet, error)
+	Prompt(ctx context.Context, r service.PromptRequest) (service.CoverPrompt, error)
 }
 
-// Services are the services the tools call, one per toolset.
+// CoverArtService is what the generate_covers and clean_cover tools, and the
+// imageId of set_cover, need from the service layer. It makes images with
+// Google's image model, which costs money, so a server has one only when it
+// has a Gemini API key; [Services].CoverArt is nil otherwise.
+type CoverArtService interface {
+	Generate(ctx context.Context, r service.GenerateRequest) (service.CoverArtResult, error)
+	Clean(ctx context.Context, itemID, instructions string, model service.CoverModel) (service.CoverArtResult, error)
+	Set(ctx context.Context, itemID, imageID string) (service.CoverSet, error)
+}
+
+// Services are the services the tools call, one per toolset. CoverArt is nil
+// without a Gemini API key, and then the tools that make covers are not offered.
+// Leave it unset in that case: a nil *service.CoverArt assigned to it is not a
+// nil interface, and would offer the paid tools.
 type Services struct {
 	Libraries LibraryService
 	Items     ItemService
@@ -71,4 +85,5 @@ type Services struct {
 	Chapters  ChapterService
 	Metadata  MetadataService
 	Covers    CoversService
+	CoverArt  CoverArtService
 }

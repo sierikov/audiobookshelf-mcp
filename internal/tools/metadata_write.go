@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -192,6 +193,7 @@ type seriesOutput struct {
 // shows as "" or [].
 type itemFieldsOutput struct {
 	Language    *string        `json:"language,omitempty"`
+	Subtitle    *string        `json:"subtitle,omitempty"`
 	Description *string        `json:"description,omitempty"`
 	Series      []seriesOutput `json:"series,omitzero"`
 	Authors     []string       `json:"authors,omitzero"`
@@ -214,7 +216,7 @@ func toSeriesOutput(list []service.SeriesEntry) []seriesOutput {
 // toFieldsOutput maps a book's fields. A list the service left nil was not
 // part of the change; the others are never nil, so an empty one shows as [].
 func toFieldsOutput(f service.ItemFields) itemFieldsOutput {
-	out := itemFieldsOutput{Language: f.Language, Description: f.Description}
+	out := itemFieldsOutput{Language: f.Language, Subtitle: f.Subtitle, Description: f.Description}
 	if f.Series != nil {
 		out.Series = toSeriesOutput(*f.Series)
 	}
@@ -270,6 +272,7 @@ func parseItemChanges(raw []any) []service.ItemChange {
 		out = append(out, service.ItemChange{
 			ItemID:      id,
 			Language:    optionalString(obj, "language"),
+			Subtitle:    optionalString(obj, "subtitle"),
 			Description: optionalString(obj, "description"),
 			Series:      optionalSeries(obj),
 			Authors:     optionalList(obj, "authors"),
@@ -327,7 +330,7 @@ func updateItems(svc MetadataService) ServerTool {
 		Toolset: metaMetadata,
 		Tool: mcp.Tool{
 			Name:        "update_items",
-			Description: `Set the language, description, series, authors and/or narrators of one or more books (up to 100, at most 10 descriptions per call). Fields left out are not touched; an empty string clears a language or description. series, authors and narrators replace the book's whole list, so send every entry the book should keep; an empty list removes them. Read the book's current lists with get_item and send them back with your change. series is a list of {name, sequence}, the sequence being the book's number as free text such as "1", "1.5" or "0", at most 16 characters, and may be left out; authors and narrators are lists of names. Names match regardless of case. Audiobookshelf creates a series or author that doesn't exist yet and deletes a series left with no books. Use the exact name of an existing series or author (search_library finds them); a misspelt name creates a new one. Audiobookshelf also deletes an author left with no books unless it has a photo, ASIN or description. Descriptions may use simple HTML: p, br, b, i, em, strong, del, ul, ol, li, and a with an http, https or mailto link; other markup, scripts, comments and invisible characters are removed before saving, and now shows what was stored. A description is at most 10,000 characters; a language, series name, author or narrator is plain text, at most 64 characters, without markup, control or invisible characters. A value equal to what the book already has passes as it is, in a list too. Show the user every change, per book from old to new, and get their confirmation before calling. For genres and tags use add_genres, remove_genres, add_tags and remove_tags. Returns each book's previous values; to undo, call again with them, except that a description comes back cleaned, a value these checks refuse can't be restored, and a series Audiobookshelf deleted comes back as a new one. Example items: [{"itemId":"li_1","language":"Russian"},{"itemId":"li_2","description":"<p>A blurb.</p>"},{"itemId":"li_3","series":[{"name":"Holly Gibney","sequence":"3"}],"authors":["Stephen King"],"narrators":["Will Patton"]}]`,
+			Description: `Set the language, subtitle, description, series, authors and/or narrators of one or more books (up to 100, at most 10 descriptions per call). Fields left out are not touched; an empty string clears a language or description. subtitle replaces the book's subtitle; an empty string removes it. series, authors and narrators replace the book's whole list, so send every entry the book should keep; an empty list removes them. Read the book's current lists with get_item and send them back with your change. series is a list of {name, sequence}, the sequence being the book's number as free text such as "1", "1.5" or "0", at most 16 characters, and may be left out; authors and narrators are lists of names. Names match regardless of case. Audiobookshelf creates a series or author that doesn't exist yet and deletes a series left with no books. Use the exact name of an existing series or author (search_library finds them); a misspelt name creates a new one. Audiobookshelf also deletes an author left with no books unless it has a photo, ASIN or description. Descriptions may use simple HTML: p, br, b, i, em, strong, del, ul, ol, li, and a with an http, https or mailto link; other markup, scripts, comments and invisible characters are removed before saving, and now shows what was stored. A description is at most 10,000 characters; a language, subtitle, series name, author or narrator is plain text, at most 64 characters (200 for a subtitle), without markup, control or invisible characters. A value equal to what the book already has passes as it is, in a list too. Show the user every change, per book from old to new, and get their confirmation before calling. For genres and tags use add_genres, remove_genres, add_tags and remove_tags. Returns each book's previous values; to undo, call again with them, except that a description comes back cleaned, a value these checks refuse can't be restored, and a series Audiobookshelf deleted comes back as a new one. Example items: [{"itemId":"li_1","language":"Russian"},{"itemId":"li_2","description":"<p>A blurb.</p>"},{"itemId":"li_3","series":[{"name":"Holly Gibney","sequence":"3"}],"authors":["Stephen King"],"narrators":["Will Patton"]}]`,
 			Annotations: destructiveWriteAnnotations(),
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
@@ -342,6 +345,7 @@ func updateItems(svc MetadataService) ServerTool {
 							Properties: map[string]*jsonschema.Schema{
 								"itemId":      {Type: "string", Description: "Library item ID of the book (from find_items, search_library or get_series)"},
 								"language":    {Type: "string", Description: "New language, plain text, at most 64 characters; an empty string clears it"},
+								"subtitle":    {Type: "string", Description: fmt.Sprintf("The book's subtitle, at most %d characters; an empty string removes it", service.MaxSubtitleLength)},
 								"description": {Type: "string", Description: "New description, simple HTML, at most 10,000 characters; an empty string clears it"},
 								"series": {
 									Type:        "array",

@@ -329,6 +329,7 @@ type MediaPayload struct {
 type MetadataPayload struct {
 	Genres      *[]string    `json:"genres,omitempty"`
 	Language    *string      `json:"language,omitempty"`
+	Subtitle    *string      `json:"subtitle,omitempty"`
 	Description *string      `json:"description,omitempty"`
 	Authors     *[]AuthorRef `json:"authors,omitempty"`
 	Narrators   *[]string    `json:"narrators,omitempty"`

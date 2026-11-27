@@ -158,25 +158,25 @@ func caseConflict(existing string, adding []string) string {
 	return fmt.Sprintf("already has %q; remove it before adding %q", existing, adding[i])
 }
 
-// Update sets the language, description, series, authors and/or narrators of
-// books.
+// Update sets the language, subtitle, description, series, authors and/or
+// narrators of books.
 //
 // Before any call it checks the changes: 1 to [MaxItemsPerCall] of them
 // ([ErrNoItems], [ErrTooManyItems]); ids non-empty and unique after
 // trimming (an [*ItemError]); at most [MaxDescriptionsPerCall] setting a
 // description ([ErrTooManyDescriptions]); and each setting at least one
-// field (an [*ItemError]). Ids, languages, descriptions and the names and
-// sequences of the lists are trimmed.
+// field (an [*ItemError]). Ids, languages, subtitles, descriptions and the
+// names and sequences of the lists are trimmed.
 //
 // One call reads every book for Previous, which holds only the fields being
 // set, as stored: a null reads as "" or as an empty list and a description is
 // its HTML. An unknown id is an [ErrUnknownItems] error and an item that is
 // not a book an [ErrBooksOnly] one. New values are then checked as
 // [checkFields] says. One call sends only the fields given; an empty string
-// clears a language or description, and a list replaces the book's whole
-// list, an empty one removing it. Changed is Audiobookshelf's count of books
-// that changed. A second read gives Now, with the same fields as Previous.
-// Items has every book in the order given.
+// clears a language, subtitle or description, and a list replaces the book's
+// whole list, an empty one removing it. Changed is Audiobookshelf's count of
+// books that changed. A second read gives Now, with the same fields as
+// Previous. Items has every book in the order given.
 //
 // If the save fails, Now is empty, Previous is kept, and the error wraps
 // [ErrWriteIncomplete] and the API error. If only the second read fails,
@@ -240,10 +240,10 @@ func checkChanges(changes []ItemChange) ([]ItemChange, []string, error) {
 	out := make([]ItemChange, len(changes))
 	for i, c := range changes {
 		if c.setsNothing() {
-			return nil, nil, &ItemError{Position: i + 1, ItemID: ids[i], Reason: "sets none of language, description, series, authors, narrators"}
+			return nil, nil, &ItemError{Position: i + 1, ItemID: ids[i], Reason: "sets none of language, subtitle, description, series, authors, narrators"}
 		}
 		out[i] = ItemChange{
-			ItemID: ids[i], Language: trimmed(c.Language), Description: trimmed(c.Description),
+			ItemID: ids[i], Language: trimmed(c.Language), Subtitle: trimmed(c.Subtitle), Description: trimmed(c.Description),
 			Series: mapPtr(c.Series, trimmedEntry), Authors: mapPtr(c.Authors, strings.TrimSpace), Narrators: mapPtr(c.Narrators, strings.TrimSpace),
 		}
 	}
@@ -263,13 +263,19 @@ func trimmed(s *string) *string {
 // pos, and returns c with its description cleaned. c is trimmed, as
 // [checkChanges] returns it. An empty string, which clears, and a value equal
 // to the stored one, both trimmed, pass untouched. A new language must pass
-// [checkPlain]; a new description must be at most [MaxDescriptionLength]
+// [checkPlain] with [MaxValueLength] and a new subtitle with
+// [MaxSubtitleLength]; a new description must be at most [MaxDescriptionLength]
 // characters and keep some text through [cleanHTML]; the lists must pass
 // [checkLists]. A failure is an [*ItemError].
 func checkFields(c ItemChange, b *abs.BookMedia, pos int) (ItemChange, error) {
 	if isNew(c.Language, b.Metadata.Language) {
 		if reason := checkPlain(*c.Language, MaxValueLength); reason != "" {
 			return c, &ItemError{Position: pos, ItemID: c.ItemID, Reason: fmt.Sprintf("language (%s) %s", quoted(*c.Language), reason)}
+		}
+	}
+	if isNew(c.Subtitle, b.Metadata.Subtitle) {
+		if reason := badValue("subtitle", *c.Subtitle, MaxSubtitleLength); reason != "" {
+			return c, &ItemError{Position: pos, ItemID: c.ItemID, Reason: reason}
 		}
 	}
 	if isNew(c.Description, b.Metadata.Description) {
@@ -287,7 +293,7 @@ func checkFields(c ItemChange, b *abs.BookMedia, pos int) (ItemChange, error) {
 
 // setsNothing reports whether c sets none of the fields a change can set.
 func (c ItemChange) setsNothing() bool {
-	return c.Language == nil && c.Description == nil && c.Series == nil && c.Authors == nil && c.Narrators == nil
+	return c.Language == nil && c.Subtitle == nil && c.Description == nil && c.Series == nil && c.Authors == nil && c.Narrators == nil
 }
 
 // isNew reports whether v sets a value that is neither empty nor, trimmed,
@@ -455,6 +461,9 @@ func storedFields(b *abs.BookMedia, c ItemChange) ItemFields {
 	if c.Language != nil {
 		f.Language = new(b.Metadata.Language)
 	}
+	if c.Subtitle != nil {
+		f.Subtitle = new(b.Metadata.Subtitle)
+	}
 	if c.Description != nil {
 		f.Description = new(b.Metadata.Description)
 	}
@@ -476,6 +485,7 @@ func storedFields(b *abs.BookMedia, c ItemChange) ItemFields {
 func metadataPayload(c ItemChange) *abs.MetadataPayload {
 	return &abs.MetadataPayload{
 		Language:    c.Language,
+		Subtitle:    c.Subtitle,
 		Description: c.Description,
 		Series:      mapPtr(c.Series, func(e SeriesEntry) abs.SeriesRef { return abs.SeriesRef{Name: e.Name, Sequence: e.Sequence} }),
 		Authors:     mapPtr(c.Authors, func(name string) abs.AuthorRef { return abs.AuthorRef{Name: name} }),

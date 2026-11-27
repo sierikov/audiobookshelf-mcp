@@ -14,6 +14,7 @@ import (
 	"context"
 
 	"github.com/sierikov/audiobookshelf-mcp/internal/abs"
+	"github.com/sierikov/audiobookshelf-mcp/internal/gemini"
 )
 
 // LibrariesAPI is the part of the Audiobookshelf API the Libraries service uses.
@@ -78,3 +79,20 @@ type CoversAPI interface {
 }
 
 var _ CoversAPI = (*abs.Client)(nil)
+
+// CoverArtAPI is the part of the Audiobookshelf API the CoverArt service uses.
+type CoverArtAPI interface {
+	Item(ctx context.Context, itemID string) (abs.LibraryItem, error)
+	ItemCover(ctx context.Context, itemID string, width int) (abs.Image, error)
+	SetCoverFile(ctx context.Context, itemID string, img abs.Image) error
+}
+
+var _ CoverArtAPI = (*abs.Client)(nil)
+
+// ImageModel is the image model the CoverArt service makes covers with,
+// satisfied by [gemini.Client] and by generated mocks in tests.
+type ImageModel interface {
+	GenerateImage(ctx context.Context, r gemini.Request) (gemini.Result, error)
+}
+
+var _ ImageModel = (*gemini.Client)(nil)

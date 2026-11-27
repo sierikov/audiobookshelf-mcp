@@ -42,9 +42,10 @@ The Go bin directory (`$(go env GOPATH)/bin`, or `$GOBIN` if you set it) must be
 
 1. Your Audiobookshelf URL and API token (Settings → Users → your user → **API Token**). The token is hidden as you type. `setup` checks them and prints `Connected to … as …`.
 2. Whether to turn on the tools that edit your library (chapters, genres, tags, descriptions, series, covers). The default is no. Yes also turns on `browse`, which finds the series and authors those tools work on.
-3. Which of the agents it found to add the server to. Press Enter for all of them.
+3. If `covers` is on: a Gemini API key, to make new covers (paid, about $0.07 to $0.16 a cover; see [Made covers](#made-covers)). It is hidden as you type. `setup` checks it with Google. Press Enter to skip it, or to keep the saved one, and type `none` to remove the saved one.
+4. Which of the agents it found to add the server to. Press Enter for all of them.
 
-It then saves your settings and adds the server to those agents, after backing up each config file it edits. The agents' configs hold only the command to run, never your token. It looks for these agents:
+It then saves your settings and adds the server to those agents, after backing up each config file it edits. The agents' configs hold only the command to run, never your token or key. It looks for these agents:
 
 | Agent | ID for `--agents` |
 |---|---|
@@ -98,19 +99,23 @@ At most once a day, `audiobookshelf-mcp version`, `setup` and the running server
 {
   "url": "https://abs.example.com",
   "token": "your-token",
-  "toolsets": ["all"]
+  "toolsets": ["all"],
+  "geminiApiKey": "your-gemini-key"
 }
 ```
 
+`geminiApiKey` is optional. Leave it out and the tools that make covers are not offered.
+
 If `XDG_CONFIG_HOME` points somewhere other than `~/.config`, apps started outside your shell, such as Claude Desktop or Cursor, may not see it and will look in `~/.config` instead. `setup` warns you when that is the case.
 
-Environment variables override the file. Re-run `setup` to change the token.
+Environment variables override the file. Re-run `setup` to change the token or the Gemini key.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `AUDIOBOOKSHELF_URL` | Unless saved by `setup` | — | Your Audiobookshelf server URL |
 | `AUDIOBOOKSHELF_TOKEN` | Unless saved by `setup` | — | API token from Settings → Users |
 | `AUDIOBOOKSHELF_TOOLSETS` | No | `libraries,items,playback` | Comma-separated toolsets to enable: `libraries`, `items`, `playback`, `browse`, `chapters`, `metadata`, `covers`. Use `all` to enable everything, including the `chapters`, `metadata` and `covers` write tools. |
+| `AUDIOBOOKSHELF_MCP_GEMINI_API_KEY` | No | — | Google Gemini API key that pays for made covers. Without one, `generate_covers` and `clean_cover` are not offered. `GEMINI_API_KEY` is never read. |
 
 ## Tools
 
@@ -140,11 +145,14 @@ Environment variables override the file. Re-run `setup` to change the token.
 | `remove_genres` | Remove genres from books (writes) | metadata |
 | `add_tags` | Add tags to books (writes) | metadata |
 | `remove_tags` | Remove tags from books (writes) | metadata |
-| `update_items` | Set the language, description, series, authors and narrators of books (writes) | metadata |
+| `update_items` | Set the language, subtitle, description, series, authors and narrators of books (writes) | metadata |
 | `search_covers` | Find covers for a book: its current cover and up to 5 candidates, as small images with their links. Also shows cover links found on the web the same way | covers |
-| `set_cover` | Set a book's cover from a candidate's link or an image found on the web; final, the old cover file is deleted (writes) | covers |
+| `get_cover_prompt` | Write a prompt for a new cover, or for cleaning one, to paste into the Gemini app or ChatGPT, with links to open them | covers |
+| `generate_covers` | Make up to 4 new covers with Google's Nano Banana image models. About $0.16 a cover on Nano Banana Pro, the default, or $0.07 on Nano Banana 2.1; needs a Gemini API key | covers |
+| `clean_cover` | Clean a book's cover, such as removing a watermark or a store label, with the same models. About $0.16 on Nano Banana Pro or $0.07 on Nano Banana 2.1; needs a Gemini API key | covers |
+| `set_cover` | Set a book's cover from a candidate's link, an image found on the web, or a made cover; final, the old cover file is deleted (writes) | covers |
 
-Default toolsets: `libraries`, `items`, `playback`. The `browse`, `chapters`, `metadata` and `covers` toolsets are opt-in via `AUDIOBOOKSHELF_TOOLSETS`. `covers` finds and sets book covers, and includes writes. `setup` asks whether to turn on the editing toolsets (`chapters`, `metadata`, `covers`; a yes adds `browse` too), and `--toolsets` sets the whole list.
+Default toolsets: `libraries`, `items`, `playback`. The `browse`, `chapters`, `metadata` and `covers` toolsets are opt-in via `AUDIOBOOKSHELF_TOOLSETS`. `covers` finds, makes and sets book covers, and includes writes. With a Gemini API key it can make covers too, which costs money. `setup` asks whether to turn on the editing toolsets (`chapters`, `metadata`, `covers`; a yes adds `browse` too), and `--toolsets` sets the whole list.
 
 ### Fixing chapters
 
@@ -152,7 +160,7 @@ With the `chapters` toolset enabled, ask things like *"Fix the chapters for Kata
 
 ### Cleaning up genres, tags and descriptions
 
-With the `metadata` toolset enabled, ask things like *"Make my genres consistent"* or *"Fix the descriptions of the Harry Hole books"*. The assistant surveys the library with `get_metadata_overview`, proposes a mapping from the old genres or tags to the new ones, and shows you the affected books. After you say yes, it adds the new value first and then removes the old one, so no book is left without it. For descriptions it looks up real ones with `search_book_metadata`, shows each change from old to new, and tells you when it wrote a description itself. Every write returns what it changed, so a change can be undone: the genre and tag tools list each book's `added` or `removed` values, and `update_items` returns the `previous` values.
+With the `metadata` toolset enabled, ask things like *"Make my genres consistent"* or *"Fix the descriptions of the Harry Hole books"*. The assistant surveys the library with `get_metadata_overview`, proposes a mapping from the old genres or tags to the new ones, and shows you the affected books. After you say yes, it adds the new value first and then removes the old one, so no book is left without it. For descriptions it looks up real ones with `search_book_metadata`, shows each change from old to new, and tells you when it wrote a description itself. `update_items` also sets a book's subtitle, and an empty string removes one, such as a junk "[роман]". Every write returns what it changed, so a change can be undone: the genre and tag tools list each book's `added` or `removed` values, and `update_items` returns the `previous` values.
 
 ### Series, authors and narrators
 
@@ -163,6 +171,17 @@ With the `metadata` toolset enabled, ask things like *"Put Holly in the Holly Gi
 With the `covers` toolset enabled, ask things like *"Find a better cover for Holly"*. `search_covers` uses Audiobookshelf's own cover search. The provider defaults to `google`; the others are the ones `search_book_metadata` takes. It returns the book's current cover and up to 5 candidates as small image previews, each candidate also with its link. A preview fits inside 400 px wide and 800 px high: a larger image is scaled down to fit, and a small JPEG, PNG or GIF is shown as it is. A WebP, which is how FantLab serves its covers, is converted to a JPEG, because some apps don't show WebP. Apps that show images from tools, such as Claude Desktop, display them. If your app doesn't, the assistant gives you the links instead, and `set_cover` waits until you have looked at them. A candidate that can't be fetched, isn't an image, is over 2 MiB or has too many pixels (*too large to preview*) comes back with a short problem and no image, and the others still arrive. A book with no cover gets candidates only. So does one whose cover Audiobookshelf can't read: that is reported (`currentProblem`) and does not fail the search.
 
 You pick one by its number, and `set_cover` sets it by its link. The cover sources can return the wrong book or edition. If none of the candidates is right, an assistant that can search the web looks for the cover there, for example on the publisher's or an audiobook store's page, and `set_cover` takes that image's link too. `search_covers` shows those links the same way, next to the current cover: it takes up to 5 of them (`urls`) in place of a source to search. **A cover change is final**: Audiobookshelf deletes the old cover file, so nothing can undo it. The assistant shows you the old and new covers side by side and asks first. `set_cover` needs the Audiobookshelf user's **Update** and **Upload** permissions; `setup` prints a note when `covers` or `all` is on and your user lacks either.
+
+### Made covers
+
+With the `covers` toolset on and a Gemini API key, ask things like *"Make a new cover for Holly, moody watercolour"* or *"Take the store label off this cover"*. `generate_covers` makes up to 4 new covers a call with Google's Nano Banana Pro image model (2048 px), or the cheaper Nano Banana 2.1 (1024 px) when you ask for it. For a series, the assistant makes one sample per style, you pick, and it makes the rest to match. `clean_cover` fixes a cover you already have, such as a watermark or a store label, and keeps the rest. Made and cleaned covers are always square, as audiobook covers are: a portrait cover comes back square, with its background extended. The assistant first shows what exists, from the cover sources and, where it can search the web, other editions and fan art, then offers at least three options, and makes or sets only the one you pick. Both show you the old cover next to the new ones. The title and the author are on a new cover as text unless you say otherwise. The prompt keeps to the setting and the opening, to keep spoilers off the cover.
+
+- **It costs money.** A cover is about $0.16 with Nano Banana Pro and about $0.07 with Nano Banana 2.1. Google has no free tier for images, so the key needs billing turned on. The assistant says how many covers it will make and what that costs, and asks for your yes before every call. Each result says how many covers this server has made since it started and what they cost, as an estimate.
+- **The key.** `setup` asks for it after the toolsets question, when `covers` or `all` is on. Or set `AUDIOBOOKSHELF_MCP_GEMINI_API_KEY`. `GEMINI_API_KEY` is never read, so a key you keep for other programs does not switch on paid tools here. Without a key, `generate_covers` and `clean_cover` are not offered; `get_cover_prompt` still is, and writes a prompt for you to paste into the Gemini app or ChatGPT, then upload the result in Audiobookshelf yourself.
+- **Made covers live in memory.** For an hour, 24 at most (the oldest go first), and are lost when the server restarts. Nothing is written to disk. `set_cover` takes a made cover by its `imageId`, and the assistant sets one only after you have seen it next to the old one and said yes. That is final like any cover change.
+- **A spending limit stops the call.** If Google answers that a spending limit, quota or credit is used up, the whole call stops at once and nothing is retried. The covers already made stay available.
+
+Which apps show you the images: the Claude Desktop chat (inside the folded tool block) and the VS Code extension do. Claude Code in a terminal shows the path of a file that the app saves (this server writes nothing to disk), and Codex and ChatGPT show nothing. Every app checked passes the images to the model, and Hermes passes at most 4 images from one result. If your app shows you no images, the assistant should not set a cover you have not seen: it uses `get_cover_prompt` instead.
 
 ---
 
@@ -297,10 +316,10 @@ Add to `~/.config/opencode/config.json`:
 The default toolsets are **read-only**. Three opt-in toolsets write, and all need an API token whose user has the **Update** permission in Audiobookshelf; `set_cover` also needs the **Upload** permission. None needs admin.
 
 - `chapters`: `set_chapters` and `rename_chapters` replace a book's chapters. They are annotated as destructive so MCP clients ask before running them, and return the previous chapters so a change can be undone when those old chapters were valid.
-- `metadata`: `add_genres`, `remove_genres`, `add_tags` and `remove_tags` add and remove genres and tags, and `update_items` sets language, description, series, authors and narrators. The remove tools and `update_items` are annotated as destructive. Every write can be undone, except what the text checks below refuse: the list tools by calling the opposite tool with each book's `added` or `removed` values, `update_items` by passing the `previous` values it returns. Audiobookshelf can limit what a user sees by tag, so `add_tags` and `remove_tags` can change what a restricted user, such as a kids account, can see.
-- `covers`: `search_covers` only reads, but it downloads the candidate images itself, from addresses the cover source chose or the assistant found on the web. A download carries no Audiobookshelf token or other credentials, takes at most 15 seconds, follows at most 3 redirects (to `http` or `https` addresses only), accepts only a JPEG, PNG, WebP or GIF of at most 2 MiB, and is never written to disk. `set_cover` replaces a book's cover with the image at a web address. That is final, because Audiobookshelf deletes the old cover file, so it is annotated as destructive and tells the assistant to show you the old and new covers side by side and get your yes first.
+- `metadata`: `add_genres`, `remove_genres`, `add_tags` and `remove_tags` add and remove genres and tags, and `update_items` sets language, subtitle, description, series, authors and narrators. The remove tools and `update_items` are annotated as destructive. Every write can be undone, except what the text checks below refuse: the list tools by calling the opposite tool with each book's `added` or `removed` values, `update_items` by passing the `previous` values it returns. Audiobookshelf can limit what a user sees by tag, so `add_tags` and `remove_tags` can change what a restricted user, such as a kids account, can see.
+- `covers`: `search_covers` only reads, but it downloads the candidate images itself, from addresses the cover source chose or the assistant found on the web. A download carries no Audiobookshelf token or other credentials, takes at most 15 seconds, follows at most 3 redirects (to `http` or `https` addresses only), accepts only a JPEG, PNG, WebP or GIF of at most 2 MiB, and is never written to disk. `set_cover` replaces a book's cover with the image at a web address. That is final, because Audiobookshelf deletes the old cover file, so it is annotated as destructive and tells the assistant to show you the old and new covers side by side and get your yes first. With a Gemini API key, `generate_covers` and `clean_cover` send data to Google. Google receives the book's title, or the other title text the assistant gives for a cover, its author and genres, the style and premise the assistant writes, and, for a series or a cleaning, a reference image or the current cover. A cleaning sends no title, author or genres, only the current cover and what to change. A cover costs about $0.16 with Nano Banana Pro and about $0.07 with Nano Banana 2.1. The tool text tells the assistant to say the count and cost and to get your yes before each call. The key goes only in the `x-goog-api-key` header to Google. It never goes in a URL, an error, a result or the output of `setup`, and never into an agent's config. Made images stay in memory.
 
-`all` includes every write tool; list toolsets explicitly to stay read-only. No tool deletes items, controls playback, or manages users. The API token comes from the settings file (readable only by you) or an environment variable, and is never logged or exposed.
+`all` includes every write tool; list toolsets explicitly to stay read-only. No tool deletes items, controls playback, or manages users. The API token and the Gemini key come from the settings file (readable only by you) or an environment variable, and are never logged or exposed.
 
 Every call is checked against the tool's input schema before it runs. An unknown argument, a wrong type, or a value out of range is refused with an error that names it, so a misspelled filter or an extra field is never silently ignored.
 
@@ -311,8 +330,8 @@ Your own Audiobookshelf is trusted: what the tools read from it is passed on as 
 What the write tools store is checked first, because that is where text from other sites can enter the library:
 
 - Descriptions (`update_items`) keep only Audiobookshelf's own allowlist: `p`, `ol`, `ul`, `li`, `strong`, `em`, `del`, `br`, `b`, `i`, and `a` with an `http`, `https` or `mailto` link. Scripts, styles, comments, other attributes and invisible characters are removed before saving, whatever Audiobookshelf version runs. A description is at most 10,000 characters, and one with no text left after cleaning is refused.
-- Genres and tags being added, the language, series names, authors, narrators and chapter titles are plain text: a value with `<` or `>`, a control or invisible character, or more than 64 characters (200 for chapter titles) is refused with an error that names it. A series number is plain text too, at most 16 characters.
-- A language, description, series, author, narrator or chapter title equal to what the book already has passes as it is, in a list too, so old values never block an edit. Removing accepts any value, so junk already in the library can still be found and removed.
+- Genres and tags being added, the language, subtitle, series names, authors, narrators and chapter titles are plain text: a value with `<` or `>`, a control or invisible character, or more than 64 characters (200 for chapter titles and subtitles) is refused with an error that names it. A series number is plain text too, at most 16 characters.
+- A language, subtitle, description, series, author, narrator or chapter title equal to what the book already has passes as it is, in a list too, so old values never block an edit. Removing accepts any value, so junk already in the library can still be found and removed.
 - Undo restores the previous values, except what these checks refuse: a description comes back cleaned, a removed genre or tag the checks refuse can't be added back, and a series Audiobookshelf deleted comes back as a new one.
 
 ## Releasing

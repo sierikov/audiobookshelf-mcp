@@ -444,7 +444,7 @@ func TestUpdate_CheckErrors(t *testing.T) {
 		{"neither field", []ItemChange{
 			{ItemID: "li_1", Language: new("English")},
 			{ItemID: " li_2 "},
-		}, nil, "item 2 (li_2): sets none of language, description, series, authors, narrators"},
+		}, nil, "item 2 (li_2): sets none of language, subtitle, description, series, authors, narrators"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -647,6 +647,91 @@ func TestUpdate_RefusesOverlongDescription(t *testing.T) {
 	updateRefused(t, nullBook("li_1", "Solaris"),
 		ItemChange{ItemID: "li_1", Description: new(strings.Repeat("a", MaxDescriptionLength+1))},
 		`item 1 (li_1): description is 10001 characters long; at most 10000`)
+}
+
+// subtitleBook is a book with a subtitle and nothing else set.
+func subtitleBook(id, title, subtitle string) abs.LibraryItem {
+	return libraryItem(id, abs.MediaTypeBook, abs.BookMedia{Metadata: abs.BookMetadata{Title: title, Subtitle: subtitle}})
+}
+
+func TestUpdate_SetsAndRemovesSubtitles(t *testing.T) {
+	ids := []string{"li_1", "li_2", "li_3"}
+	api := NewMockMetadataAPI(t)
+	api.EXPECT().ItemsByID(mock.Anything, ids).Return([]abs.LibraryItem{
+		subtitleBook("li_1", "Solaris", ""),
+		subtitleBook("li_2", "Пикник на обочине", "[роман]"),
+		metaBook("li_3", "Dune", "", "", "English", "", nil, nil),
+	}, nil).Once()
+	api.EXPECT().ItemsByID(mock.Anything, ids).Return([]abs.LibraryItem{
+		subtitleBook("li_1", "Solaris", "A Novel"),
+		subtitleBook("li_2", "Пикник на обочине", ""),
+		metaBook("li_3", "Dune", "", "", "Russian", "", nil, nil),
+	}, nil).Once()
+	sent := recordUpdates(api, 3)
+	changes := []ItemChange{
+		{ItemID: "li_1", Subtitle: new("  A Novel \n")},
+		{ItemID: "li_2", Subtitle: new("")},
+		{ItemID: "li_3", Language: new("Russian")}, // no subtitle: it is left out
+	}
+
+	got, err := NewMetadata(api).Update(t.Context(), changes)
+
+	require.NoError(t, err)
+	assert.Equal(t, []abs.ItemUpdate{
+		{ID: "li_1", MediaPayload: abs.MediaPayload{Metadata: &abs.MetadataPayload{Subtitle: new("A Novel")}}},
+		{ID: "li_2", MediaPayload: abs.MediaPayload{Metadata: &abs.MetadataPayload{Subtitle: new("")}}},
+		{ID: "li_3", MediaPayload: abs.MediaPayload{Metadata: &abs.MetadataPayload{Language: new("Russian")}}},
+	}, *sent)
+	assertSentJSON(t, `[
+		{"id":"li_1","mediaPayload":{"metadata":{"subtitle":"A Novel"}}},
+		{"id":"li_2","mediaPayload":{"metadata":{"subtitle":""}}},
+		{"id":"li_3","mediaPayload":{"metadata":{"language":"Russian"}}}
+	]`, *sent)
+	assert.Equal(t, UpdateResult{Changed: 3, Items: []ItemUpdateResult{
+		{ItemID: "li_1", Title: "Solaris", Previous: ItemFields{Subtitle: new("")}, Now: ItemFields{Subtitle: new("A Novel")}},
+		{ItemID: "li_2", Title: "Пикник на обочине", Previous: ItemFields{Subtitle: new("[роман]")}, Now: ItemFields{Subtitle: new("")}},
+		{ItemID: "li_3", Title: "Dune", Previous: ItemFields{Language: new("English")}, Now: ItemFields{Language: new("Russian")}},
+	}}, got, "a subtitle is reported as the other fields are, and only when it was part of the change")
+	assert.Equal(t, "  A Novel \n", *changes[0].Subtitle, "the caller's change is left as it was")
+}
+
+func TestUpdate_RefusesBadSubtitles(t *testing.T) {
+	tests := []struct {
+		name     string
+		subtitle string
+		want     string
+	}{
+		{"201 characters", strings.Repeat("a", MaxSubtitleLength+1),
+			fmt.Sprintf(`item 1 (li_1): subtitle (%q…) is 201 characters long; at most 200`, strings.Repeat("a", 40))},
+		{"201 Cyrillic characters", strings.Repeat("я", MaxSubtitleLength+1),
+			fmt.Sprintf(`item 1 (li_1): subtitle (%q…) is 201 characters long; at most 200`, strings.Repeat("я", 40))},
+		{"markup", "<b>A Novel</b>", `item 1 (li_1): subtitle ("<b>A Novel</b>") contains "<"; use plain text without markup`},
+		{"a control character", "A\tNovel", `item 1 (li_1): subtitle ("A\tNovel") contains the control character U+0009`},
+		{"an invisible character", "A\u200b Novel", `item 1 (li_1): subtitle ("A\u200b Novel") contains the invisible character U+200B`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			updateRefused(t, subtitleBook("li_1", "Solaris", "[роман]"), ItemChange{ItemID: "li_1", Subtitle: new(tt.subtitle)}, tt.want)
+		})
+	}
+}
+
+func TestUpdate_SubtitleAtTheLimitPasses(t *testing.T) {
+	// The limit counts characters, not bytes: 200 Cyrillic letters are 400 bytes.
+	subtitle := strings.Repeat("я", MaxSubtitleLength)
+
+	sent := updateAccepted(t, subtitleBook("li_1", "Solaris", ""), ItemChange{ItemID: "li_1", Subtitle: new(subtitle)})
+
+	assert.Equal(t, &abs.MetadataPayload{Subtitle: new(subtitle)}, sent[0].MediaPayload.Metadata)
+}
+
+func TestUpdate_AStoredSubtitleSentBackPassesAtAnyLength(t *testing.T) {
+	stored := " [" + strings.Repeat("я", MaxSubtitleLength+50) + "<b>] "
+
+	sent := updateAccepted(t, subtitleBook("li_1", "Solaris", stored), ItemChange{ItemID: "li_1", Subtitle: new(strings.TrimSpace(stored))})
+
+	assert.Equal(t, &abs.MetadataPayload{Subtitle: new(strings.TrimSpace(stored))}, sent[0].MediaPayload.Metadata,
+		"old junk never blocks an edit, as for the other fields")
 }
 
 func TestUpdate_UnchangedValuesPass(t *testing.T) {
@@ -951,7 +1036,15 @@ func TestCheckChanges_NothingSet(t *testing.T) {
 	require.ErrorAs(t, err, &itemErr)
 	assert.Equal(t, 2, itemErr.Position)
 	assert.Equal(t, "li_2", itemErr.ItemID)
-	assert.Equal(t, "sets none of language, description, series, authors, narrators", itemErr.Reason)
+	assert.Equal(t, "sets none of language, subtitle, description, series, authors, narrators", itemErr.Reason)
+}
+
+func TestCheckChanges_ASubtitleCounts(t *testing.T) {
+	for _, subtitle := range []string{"A Novel", ""} {
+		_, _, err := checkChanges([]ItemChange{{ItemID: "li_1", Subtitle: new(subtitle)}})
+
+		assert.NoError(t, err, "a subtitle %q is a field set, and an empty one removes it", subtitle)
+	}
 }
 
 func TestCheckChanges_EmptyListsCount(t *testing.T) {

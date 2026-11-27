@@ -73,6 +73,12 @@
           "name": "AUDIOBOOKSHELF_TOOLSETS",
           "isRequired": false,
           "description": "Comma-separated toolsets, or all"
+        },
+        {
+          "name": "AUDIOBOOKSHELF_MCP_GEMINI_API_KEY",
+          "isRequired": false,
+          "isSecret": true,
+          "description": "Gemini API key for making new covers (paid, about $0.07 to $0.16 a cover); not needed after running setup"
         }
       ]
     }

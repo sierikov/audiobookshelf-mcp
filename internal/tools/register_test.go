@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ func mockServices(t *testing.T) Services {
 		Chapters:  NewMockChapterService(t),
 		Metadata:  NewMockMetadataService(t),
 		Covers:    NewMockCoversService(t),
+		CoverArt:  NewMockCoverArtService(t),
 	}
 }
 
@@ -104,8 +106,32 @@ func TestRegister_RejectsArgumentsTheSchemaDoesNotAllow(t *testing.T) {
 			[]string{"invalid arguments for find_items:", `has type "null"`}},
 		{"cover provider outside the enum", "search_covers", map[string]any{"itemId": "li_1", "provider": "bing"},
 			[]string{"invalid arguments for search_covers:", "bing"}},
-		{"cover url missing", "set_cover", map[string]any{"itemId": "li_1"},
-			[]string{"invalid arguments for set_cover:", `missing properties: ["url"]`}},
+		{"cover image id as a number", "set_cover", map[string]any{"itemId": "li_1", "imageId": 7},
+			[]string{"invalid arguments for set_cover:", `want "string"`}},
+		{"no covers to make", "generate_covers", map[string]any{"covers": []any{}},
+			[]string{"invalid arguments for generate_covers:", "/properties/covers", "minItems"}},
+		{"too many covers to make", "generate_covers", map[string]any{"covers": manyCovers(5)},
+			[]string{"invalid arguments for generate_covers:", "/properties/covers", "maxItems"}},
+		{"cover to make without a style", "generate_covers", map[string]any{"covers": []any{map[string]any{"itemId": "li_1"}}},
+			[]string{"invalid arguments for generate_covers:", `missing properties: ["style"]`}},
+		{"cover to make without a book", "generate_covers", map[string]any{"covers": []any{map[string]any{"style": "noir"}}},
+			[]string{"invalid arguments for generate_covers:", `missing properties: ["itemId"]`}},
+		{"style too long", "generate_covers", map[string]any{"covers": []any{map[string]any{"itemId": "li_1", "style": strings.Repeat("a", 301)}}},
+			[]string{"invalid arguments for generate_covers:", "maxLength"}},
+		{"premise too long", "generate_covers",
+			map[string]any{"covers": []any{map[string]any{"itemId": "li_1", "style": "noir", "premise": strings.Repeat("a", 501)}}},
+			[]string{"invalid arguments for generate_covers:", "maxLength"}},
+		{"unknown key inside a cover to make", "generate_covers",
+			map[string]any{"covers": []any{map[string]any{"itemId": "li_1", "style": "noir", "mood": "dark"}}},
+			[]string{"invalid arguments for generate_covers:", `unexpected additional properties ["mood"]`}},
+		{"title text as a word for the made covers", "generate_covers", map[string]any{"covers": manyCovers(1), "titleText": "no"},
+			[]string{"invalid arguments for generate_covers:", `want "boolean"`}},
+		{"cleaning without instructions", "clean_cover", map[string]any{"itemId": "li_1"},
+			[]string{"invalid arguments for clean_cover:", `missing properties: ["instructions"]`}},
+		{"cleaning instructions too long", "clean_cover", map[string]any{"itemId": "li_1", "instructions": strings.Repeat("a", 301)},
+			[]string{"invalid arguments for clean_cover:", "maxLength"}},
+		{"title text as a word", "get_cover_prompt", map[string]any{"itemId": "li_1", "style": "noir", "titleText": "no"},
+			[]string{"invalid arguments for get_cover_prompt:", `want "boolean"`}},
 		{"unknown key", "find_items", map[string]any{"libraryId": "lib_1", "genres": []any{"Fantasy"}},
 			[]string{`invalid arguments for find_items: unexpected additional properties ["genres"]`}},
 		{"unknown key inside an item", "update_items",
@@ -124,6 +150,15 @@ func TestRegister_RejectsArgumentsTheSchemaDoesNotAllow(t *testing.T) {
 			assert.NotContains(t, text, "validating root")
 		})
 	}
+}
+
+// manyCovers returns n covers to make, each of a different book.
+func manyCovers(n int) []any {
+	covers := make([]any, n)
+	for i := range covers {
+		covers[i] = map[string]any{"itemId": fmt.Sprintf("li_%d", i), "style": "noir"}
+	}
+	return covers
 }
 
 // manyIDs returns n distinct item ids.
@@ -198,11 +233,13 @@ func TestRegister_ValidCallsReachTheServices(t *testing.T) {
 					service.Page{Limit: 10, Page: 2}).Return(service.MetadataPage{}, nil)
 			}, ""},
 		{"update_items", map[string]any{"items": []any{
-			map[string]any{"itemId": "li_1", "language": "Russian"}, map[string]any{"itemId": "li_2", "description": ""},
+			map[string]any{"itemId": "li_1", "language": "Russian", "subtitle": "Роман"},
+			map[string]any{"itemId": "li_2", "description": "", "subtitle": ""},
 		}},
 			func(s Services) {
 				s.Metadata.(*MockMetadataService).EXPECT().Update(mock.Anything, []service.ItemChange{
-					{ItemID: "li_1", Language: new("Russian")}, {ItemID: "li_2", Description: new("")},
+					{ItemID: "li_1", Language: new("Russian"), Subtitle: new("Роман")},
+					{ItemID: "li_2", Description: new(""), Subtitle: new("")},
 				}).Return(service.UpdateResult{}, nil)
 			}, ""},
 		{"search_covers", map[string]any{"itemId": "li_1", "provider": "audible", "title": "Holly", "author": "Stephen King"},
@@ -215,11 +252,57 @@ func TestRegister_ValidCallsReachTheServices(t *testing.T) {
 				s.Covers.(*MockCoversService).EXPECT().Find(mock.Anything, "li_1", "google", "", "").
 					Return(service.CoverSearch{ItemID: "li_1", Title: "Holly", Provider: "google"}, nil)
 			}, `"source":"google"`},
+		{"get_cover_prompt", map[string]any{"itemId": "li_1", "style": "noir", "premise": "A town in winter.", "titleText": false},
+			func(s Services) {
+				s.Covers.(*MockCoversService).EXPECT().
+					Prompt(mock.Anything, service.PromptRequest{ItemID: "li_1", Style: "noir", Premise: "A town in winter."}).
+					Return(service.CoverPrompt{ItemID: "li_1", Title: "Holly", Prompt: "p"}, nil)
+			}, `"title":"Holly"`},
+		{"get_cover_prompt", map[string]any{"itemId": "li_1", "instructions": "remove the label"},
+			func(s Services) {
+				s.Covers.(*MockCoversService).EXPECT().
+					Prompt(mock.Anything, service.PromptRequest{ItemID: "li_1", Instructions: "remove the label", TitleText: true}).
+					Return(service.CoverPrompt{ItemID: "li_1", Title: "Holly", Prompt: "p", Edit: true}, nil)
+			}, `"edit":true`},
 		{"set_cover", map[string]any{"itemId": "li_1", "url": "https://img.example/1.jpg"},
 			func(s Services) {
 				s.Covers.(*MockCoversService).EXPECT().Set(mock.Anything, "li_1", "https://img.example/1.jpg").
 					Return(service.CoverSet{ItemID: "li_1", Title: "Holly"}, nil)
 			}, `"title":"Holly"`},
+		{"set_cover", map[string]any{"itemId": "li_1", "imageId": "gen_0123456789abcdef"},
+			func(s Services) {
+				s.CoverArt.(*MockCoverArtService).EXPECT().Set(mock.Anything, "li_1", "gen_0123456789abcdef").
+					Return(service.CoverSet{ItemID: "li_1", Title: "Holly"}, nil)
+			}, `"title":"Holly"`},
+		{"generate_covers", map[string]any{
+			"covers": []any{
+				map[string]any{"itemId": "li_1", "style": "noir", "premise": "A town in winter.", "title": "Холли"},
+				map[string]any{"itemId": "li_2", "style": "pop art"},
+			},
+			"titleText": false, "model": "standard", "referenceImageId": "gen_0123456789abcdef",
+		},
+			func(s Services) {
+				s.CoverArt.(*MockCoverArtService).EXPECT().Generate(mock.Anything, service.GenerateRequest{
+					Covers: []service.NewCoverRequest{
+						{ItemID: "li_1", Style: "noir", Premise: "A town in winter.", Title: "Холли"}, {ItemID: "li_2", Style: "pop art"},
+					},
+					Model:            service.CoverModelStandard,
+					ReferenceImageID: "gen_0123456789abcdef",
+				}).Return(service.CoverArtResult{}, nil)
+			}, `"source":"gemini"`},
+		{"generate_covers", map[string]any{"covers": manyCovers(1), "referenceItemId": "li_9"},
+			func(s Services) {
+				s.CoverArt.(*MockCoverArtService).EXPECT().Generate(mock.Anything, service.GenerateRequest{
+					Covers:          []service.NewCoverRequest{{ItemID: "li_0", Style: "noir"}},
+					TitleText:       true,
+					ReferenceItemID: "li_9",
+				}).Return(service.CoverArtResult{}, nil)
+			}, `"source":"gemini"`},
+		{"clean_cover", map[string]any{"itemId": "li_1", "instructions": "remove the store label", "model": "standard"},
+			func(s Services) {
+				s.CoverArt.(*MockCoverArtService).EXPECT().Clean(mock.Anything, "li_1", "remove the store label", service.CoverModelStandard).
+					Return(service.CoverArtResult{}, nil)
+			}, `"source":"gemini"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.tool, func(t *testing.T) {
@@ -235,10 +318,12 @@ func TestRegister_ValidCallsReachTheServices(t *testing.T) {
 }
 
 func TestRegister_ClientsSeeClosedSchemas(t *testing.T) {
-	cs := connectSession(t, NewServer(Services{}, Options{Toolsets: []string{"all"}}))
+	svcs := mockServices(t) // with the made-cover tools, which need a service
+	cs := connectSession(t, NewServer(svcs, Options{Toolsets: []string{"all"}}))
 	list, err := cs.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	require.Len(t, list.Tools, len(AllTools(Services{})))
+	require.Len(t, list.Tools, len(AllTools(svcs)))
+	require.Greater(t, len(AllTools(svcs)), len(AllTools(Services{})))
 
 	for _, tool := range list.Tools {
 		raw, err := json.Marshal(tool.InputSchema)
@@ -269,7 +354,7 @@ func assertObjectsClosed(t *testing.T, tool, path string, node any) {
 }
 
 func TestAllTools_SchemasAcceptOnlyDeclaredKeys(t *testing.T) {
-	for _, st := range AllTools(Services{}) {
+	for _, st := range AllTools(Services{CoverArt: NewMockCoverArtService(t)}) {
 		name := st.Tool.Name
 		resolved, err := inputSchema(&st.Tool)
 		require.NoError(t, err, name)
@@ -336,6 +421,8 @@ func TestAllTools_SchemaLengthLimits(t *testing.T) {
 	item := schemaOf(t, "update_items").Properties["items"].Items
 	assert.Nil(t, item.Properties["language"].MaxLength)
 	assert.Contains(t, item.Properties["language"].Description, "64 characters")
+	assert.Nil(t, item.Properties["subtitle"].MaxLength)
+	assert.Contains(t, item.Properties["subtitle"].Description, "200 characters")
 	assert.Nil(t, item.Properties["description"].MaxLength)
 	assert.Contains(t, item.Properties["description"].Description, "10,000 characters")
 	setTitle := schemaOf(t, "set_chapters").Properties["chapters"].Items.Properties["title"]

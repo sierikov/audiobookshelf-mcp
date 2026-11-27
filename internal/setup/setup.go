@@ -1,6 +1,7 @@
 // Package setup is the flow behind "audiobookshelf-mcp setup". It checks the
-// Audiobookshelf URL and token, saves them to the settings file once, and adds
-// this server to every AI agent found on the machine.
+// Audiobookshelf URL and token, and a Gemini API key when covers are on,
+// saves them to the settings file once, and adds this server to every AI agent
+// found on the machine.
 package setup
 
 import (
@@ -22,12 +23,16 @@ import (
 )
 
 // maxAttempts is how many times an interactive run asks for the URL and token
-// before it gives up on a connection that keeps failing.
+// before it gives up on a connection that keeps failing, and for the Gemini
+// key before it goes on without it.
 const maxAttempts = 3
 
 // noAgents is the --agents value, and the answer to the agent prompt, that
 // skips adding the server to any agent.
 const noAgents = "none"
+
+// noKey is the answer to the Gemini key prompt that removes the saved key.
+const noKey = "none"
 
 // editingToolsets are the toolsets that write to the library. "all" includes
 // them.
@@ -76,8 +81,12 @@ type Deps struct {
 	Verify func(ctx context.Context, url, token string) (Account, error)
 	// Entry is the command every agent is told to run.
 	Entry agents.Entry
-	// ReadSecret reads the token without echoing it. Run ends the prompt line
-	// itself once it returns. Nil reads a plain line from the input instead.
+	// CheckGeminiKey checks a Gemini API key with Google, which costs nothing.
+	// Nil accepts any key unchecked.
+	CheckGeminiKey func(ctx context.Context, key string) error
+	// ReadSecret reads the token and the Gemini key without echoing them. Run
+	// ends the prompt line itself once it returns. Nil reads a plain line from
+	// the input instead.
 	ReadSecret func() (string, error)
 	// Getenv reads an environment variable. Run uses it to warn when
 	// XDG_CONFIG_HOME moves the settings file away from where apps started
@@ -87,10 +96,11 @@ type Deps struct {
 
 // Run asks for what the flags in opts leave open, checks the connection, saves
 // the settings and adds the server to the chosen agents. Prompts and results
-// go to out and answers are read from in. The token is never written to out.
+// go to out and answers are read from in. The token and the Gemini key are
+// never written to out.
 //
 // Settings that are already saved are the defaults: pressing Enter at a prompt
-// keeps them.
+// keeps them. A run that does not ask for the Gemini key keeps the saved one.
 func Run(ctx context.Context, in io.Reader, out io.Writer, opts Options, deps Deps) error {
 	s := &session{in: bufio.NewReader(in), out: out, opts: opts, deps: deps}
 
@@ -107,6 +117,9 @@ func Run(ctx context.Context, in io.Reader, out io.Writer, opts Options, deps De
 		return err
 	}
 	if cfg.Toolsets, err = s.askToolsets(saved.Toolsets); err != nil {
+		return err
+	}
+	if cfg.GeminiKey, err = s.askGeminiKey(ctx, saved.GeminiKey, cfg.Toolsets); err != nil {
 		return err
 	}
 	s.warnWithoutUpdate(acct, cfg.Toolsets)
@@ -165,7 +178,8 @@ func (s *session) ask(prompt string) (string, error) {
 // maxAttempts times in all; a --yes run fails at once. On a retry, Enter at
 // the URL prompt keeps the URL just tried, which the prompt shows, and Enter
 // at the token prompt keeps the saved token, never the one that just failed.
-// The returned settings hold the URL and token only.
+// The returned settings hold the URL and token only; the rest of the settings
+// are carried over by Run.
 func (s *session) connect(ctx context.Context, saved config.Config) (config.Config, Account, error) {
 	cur := config.Config{URL: normalizeURL(saved.URL)}
 	flagURL, flagToken := s.opts.URL, s.opts.Token
@@ -243,25 +257,29 @@ func (s *session) askToken(flag, def string) (string, error) {
 	return v, nil
 }
 
-// readToken prompts for the token and reads it with ReadSecret when that is
-// set, so the terminal does not echo it.
+// readToken prompts for the token and reads it hidden.
 func (s *session) readToken(haveSaved bool) (string, error) {
 	prompt := "API token (Settings → Users → your user → API Token)"
 	if haveSaved {
 		prompt += ", Enter keeps the saved one"
 	}
-	prompt += ": "
+	return s.readHidden(prompt+": ", "the token")
+}
+
+// readHidden prints prompt and reads the answer with ReadSecret when that is
+// set, so the terminal does not echo it. what names the answer in an error.
+func (s *session) readHidden(prompt, what string) (string, error) {
 	if s.deps.ReadSecret == nil {
 		return s.ask(prompt)
 	}
 	s.printf("%s", prompt)
-	token, err := s.deps.ReadSecret()
+	answer, err := s.deps.ReadSecret()
 	// The Enter key was not echoed, so end the prompt line here.
 	s.printf("\n")
 	if err != nil {
-		return "", fmt.Errorf("reading the token: %w", err)
+		return "", fmt.Errorf("reading %s: %w", what, err)
 	}
-	return token, nil
+	return answer, nil
 }
 
 // askToolsets returns the toolsets to save: the flag, else the saved ones for
@@ -294,6 +312,56 @@ func (s *session) askToolsets(saved []string) ([]string, error) {
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("unexpected answer %q: type y or n", answer)
+	}
+}
+
+// askGeminiKey returns the Gemini API key to save. Made covers cost money, so
+// the key is asked for only in an interactive run that has covers on; every
+// other run keeps the saved key as it is. At the prompt, Enter keeps the saved
+// key (or goes without one when none is saved) and "none" removes it. A new key
+// is checked with Google, which costs nothing, and one Google refuses is asked
+// for again, up to maxAttempts times in all; after that the key is skipped and
+// the saved one, if any, is kept, because setup goes on without it. The key is
+// read hidden and never printed, not even in an error.
+func (s *session) askGeminiKey(ctx context.Context, saved string, toolsets []string) (string, error) {
+	if s.opts.Yes || !makesCovers(toolsets) {
+		return saved, nil
+	}
+	prompt := `Gemini API key for made covers (paid: about $0.07 to $0.16 a cover; Enter to skip, "` + noKey + `" to remove): `
+	if saved != "" {
+		prompt = `Gemini API key for made covers (paid: about $0.07 to $0.16 a cover; Enter to keep the saved key, "` + noKey + `" to remove): `
+	}
+	for attempt := 1; ; attempt++ {
+		answer, err := s.readHidden(prompt, "the Gemini key")
+		if err != nil {
+			return "", err
+		}
+		answer = strings.TrimSpace(answer)
+		switch {
+		case answer == "":
+			return saved, nil
+		case strings.EqualFold(answer, noKey):
+			return "", nil
+		}
+		if s.deps.CheckGeminiKey == nil {
+			return answer, nil
+		}
+		err = s.deps.CheckGeminiKey(ctx, answer)
+		if err == nil {
+			s.printf("Gemini key works (this check can't see whether your Google project has credit).\n")
+			return answer, nil
+		}
+		s.printf("Google refused the key: %v\n", withoutToken(err, answer))
+		if attempt == maxAttempts {
+			// The key is optional, so a key that keeps failing must not throw away
+			// what has been entered already: go without it, and keep the saved key.
+			if saved != "" {
+				s.printf("Kept the saved Gemini key.\n")
+			} else {
+				s.printf("Skipped the Gemini key; made covers stay off.\n")
+			}
+			return saved, nil
+		}
 	}
 }
 
@@ -331,7 +399,7 @@ func (s *session) warnWithoutUpdate(acct Account, toolsets []string) {
 // warnWithoutUpload says so when set_cover is on but the user may not upload
 // files to Audiobookshelf. "all" turns set_cover on too.
 func (s *session) warnWithoutUpload(acct Account, toolsets []string) {
-	if (slices.Contains(toolsets, "covers") || slices.Contains(toolsets, "all")) && !acct.CanUpload {
+	if makesCovers(toolsets) && !acct.CanUpload {
 		s.printf("Note: %s has no Upload permission in Audiobookshelf, so set_cover will fail until an admin grants it.\n", acct.Username)
 	}
 }
@@ -513,6 +581,12 @@ func editsLibrary(toolsets []string) bool {
 	return slices.ContainsFunc(toolsets, func(t string) bool { return slices.Contains(editingToolsets, t) })
 }
 
+// makesCovers reports whether toolsets include covers, which is where the tools
+// that make covers live once there is a Gemini key. "all" includes it.
+func makesCovers(toolsets []string) bool {
+	return slices.Contains(toolsets, "covers") || slices.Contains(toolsets, "all")
+}
+
 // normalizeURL trims spaces and trailing slashes.
 func normalizeURL(s string) string {
 	return strings.TrimRight(strings.TrimSpace(s), "/")
@@ -529,7 +603,7 @@ func countLibraries(n int) string {
 // withoutToken returns err with every occurrence of token in its message
 // masked, so a server or proxy that echoes the credentials back cannot put
 // the token on the screen. An error that does not mention the token comes
-// back unchanged.
+// back unchanged. Any other secret, such as the Gemini key, can stand in for token.
 func withoutToken(err error, token string) error {
 	if token == "" || !strings.Contains(err.Error(), token) {
 		return err

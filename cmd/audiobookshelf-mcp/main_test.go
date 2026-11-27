@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,13 +13,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sierikov/audiobookshelf-mcp/internal/abs"
 	"github.com/sierikov/audiobookshelf-mcp/internal/abs/abstest"
 	"github.com/sierikov/audiobookshelf-mcp/internal/buildinfo"
 	"github.com/sierikov/audiobookshelf-mcp/internal/config"
+	"github.com/sierikov/audiobookshelf-mcp/internal/gemini"
 	"github.com/sierikov/audiobookshelf-mcp/internal/setup"
+	"github.com/sierikov/audiobookshelf-mcp/internal/tools"
 	"github.com/sierikov/audiobookshelf-mcp/internal/update"
 )
 
@@ -39,6 +45,8 @@ func sandbox(t *testing.T) string {
 	t.Setenv("AUDIOBOOKSHELF_URL", "")
 	t.Setenv("AUDIOBOOKSHELF_TOKEN", "")
 	t.Setenv("AUDIOBOOKSHELF_TOOLSETS", "")
+	t.Setenv("AUDIOBOOKSHELF_MCP_GEMINI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
 	t.Setenv("AUDIOBOOKSHELF_MCP_NO_UPDATE_CHECK", "1")
 	path, err := config.Path()
 	require.NoError(t, err)
@@ -159,6 +167,117 @@ func TestRun_ServeBrokenSettingsFile(t *testing.T) {
 	assert.Contains(t, stderr, "error: parsing")
 }
 
+// toolNames lists the tools a client sees on the server that tools.NewServer
+// builds from svcs, with every toolset on.
+func toolNames(t *testing.T, svcs tools.Services) []string {
+	t.Helper()
+	server := tools.NewServer(svcs, tools.Options{Toolsets: []string{"all"}})
+	st, ct := mcp.NewInMemoryTransports()
+	_, err := server.Connect(t.Context(), st, nil)
+	require.NoError(t, err)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(t.Context(), ct, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+
+	var names []string
+	for tool, err := range cs.Tools(t.Context(), nil) {
+		require.NoError(t, err)
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+func TestServe_RegistersCoverArtOnlyWithAKey(t *testing.T) {
+	cfg := config.Config{URL: "https://abs.example", Token: "tok"}
+	client := abs.NewClient(cfg.URL, cfg.Token)
+
+	t.Run("without a key", func(t *testing.T) {
+		names := toolNames(t, newServices(cfg, client))
+
+		assert.NotContains(t, names, "generate_covers")
+		assert.NotContains(t, names, "clean_cover")
+		assert.Contains(t, names, "get_cover_prompt")
+		assert.Contains(t, names, "set_cover")
+	})
+
+	t.Run("with a key", func(t *testing.T) {
+		withKey := cfg
+		withKey.GeminiKey = "gem-key"
+
+		names := toolNames(t, newServices(withKey, client))
+
+		assert.Contains(t, names, "generate_covers")
+		assert.Contains(t, names, "clean_cover")
+		assert.Contains(t, names, "get_cover_prompt")
+		assert.Contains(t, names, "set_cover")
+	})
+
+	t.Run("without a key the service is a nil interface", func(t *testing.T) {
+		// A nil *service.CoverArt in the interface would not be nil, and would
+		// switch the paid tools on, so this compares the interface itself.
+		artIsNil := newServices(cfg, client).CoverArt == nil
+		assert.True(t, artIsNil)
+	})
+}
+
+func TestLoadConfig_GeminiKeyComesFromTheFileOrTheServersOwnVariable(t *testing.T) {
+	path := sandbox(t)
+	require.NoError(t, config.Save(path, config.Config{URL: "https://abs.example", Token: "tok", GeminiKey: "from-file"}))
+
+	t.Run("the file", func(t *testing.T) {
+		cfg, err := loadConfig()
+
+		require.NoError(t, err)
+		assert.Equal(t, "from-file", cfg.GeminiKey)
+	})
+	t.Run("the variable replaces the file", func(t *testing.T) {
+		t.Setenv("AUDIOBOOKSHELF_MCP_GEMINI_API_KEY", "from-env")
+
+		cfg, err := loadConfig()
+
+		require.NoError(t, err)
+		assert.Equal(t, "from-env", cfg.GeminiKey)
+	})
+	t.Run("GEMINI_API_KEY is never read", func(t *testing.T) {
+		require.NoError(t, config.Save(path, config.Config{URL: "https://abs.example", Token: "tok"}))
+		t.Setenv("GEMINI_API_KEY", "somebody-elses")
+
+		cfg, err := loadConfig()
+
+		require.NoError(t, err)
+		assert.Empty(t, cfg.GeminiKey)
+	})
+}
+
+func TestGeminiKeyChecker(t *testing.T) {
+	const goodKey = "good-gem-key"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/models/"+string(gemini.ModelPro) && r.Header.Get("x-goog-api-key") == goodKey {
+			_, _ = w.Write([]byte(`{"name":"models/` + string(gemini.ModelPro) + `"}`))
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"API key not valid.","status":"INVALID_ARGUMENT"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	check := geminiKeyChecker(srv.URL)
+
+	require.NoError(t, check(t.Context(), goodKey))
+
+	err := check(t.Context(), "bad-gem-key")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "bad-gem-key")
+}
+
+func TestSetupDeps_ChecksTheGeminiKey(t *testing.T) {
+	sandbox(t)
+
+	deps, err := setupDeps(strings.NewReader(""), &bytes.Buffer{})
+
+	require.NoError(t, err)
+	assert.NotNil(t, deps.CheckGeminiKey)
+}
+
 func TestRun_SetupSavesSettings(t *testing.T) {
 	path := sandbox(t)
 	srv := fakeAudiobookshelf(t)
@@ -261,6 +380,7 @@ func TestRun_SetupHelp(t *testing.T) {
 		assert.Contains(t, stdout, flagName)
 	}
 	assert.Contains(t, stdout, "libraries,items,playback,browse,chapters,metadata,covers", "the --toolsets example is what answering y saves")
+	assert.Contains(t, stdout, "Gemini API key", "setup asks for the key when covers are on")
 	assert.Empty(t, stderr)
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -22,10 +23,14 @@ import (
 const maxConcurrentPreviews = 2
 
 // Covers finds covers for a book on a metadata provider, shows covers found
-// elsewhere next to a book's own, and sets a book's cover from a web URL.
+// elsewhere next to a book's own, sets a book's cover from a web URL, and
+// writes prompts for making a cover in an image app.
 type Covers struct {
 	api   CoversAPI
 	fetch ImageFetcher
+	// serverURL is the address of the Audiobookshelf server, without a
+	// trailing slash.
+	serverURL string
 	// preview makes the preview of an image; tests replace it.
 	preview func(abs.Image) (abs.Image, error)
 	// slots has a place for each preview being made, [maxConcurrentPreviews]
@@ -35,9 +40,14 @@ type Covers struct {
 }
 
 // NewCovers creates a Covers service that talks to Audiobookshelf through
-// api and downloads cover images with fetch.
-func NewCovers(api CoversAPI, fetch ImageFetcher) *Covers {
-	return &Covers{api: api, fetch: fetch, preview: preview, slots: make(chan struct{}, maxConcurrentPreviews)}
+// api and downloads cover images with fetch. serverURL is the address of the
+// Audiobookshelf server, which the pages of its books are built from; a
+// trailing slash is dropped.
+func NewCovers(api CoversAPI, fetch ImageFetcher, serverURL string) *Covers {
+	return &Covers{
+		api: api, fetch: fetch, serverURL: strings.TrimRight(serverURL, "/"),
+		preview: preview, slots: make(chan struct{}, maxConcurrentPreviews),
+	}
 }
 
 // Find searches a provider (one of [MetadataProviders], typed in any case) for
@@ -92,7 +102,7 @@ func (s *Covers) search(ctx context.Context, itemID, source string, find func(ti
 		return CoverSearch{}, err
 	}
 	m := b.Metadata
-	current, currentProblem, err := s.currentCover(ctx, itemID)
+	current, currentProblem, err := currentCover(ctx, s.api, itemID)
 	if err != nil {
 		return CoverSearch{}, err
 	}
@@ -110,12 +120,15 @@ func (s *Covers) search(ctx context.Context, itemID, source string, find func(ti
 	}, nil
 }
 
-// currentCover fetches a book's cover. A book without one is not an error:
-// Audiobookshelf answers 404, and the cover is nil. Nor is another status of
-// Audiobookshelf: the cover is nil and the problem says what the status was,
-// and nothing the server said. An error that is not a status is returned.
-func (s *Covers) currentCover(ctx context.Context, itemID string) (img *abs.Image, problem string, err error) {
-	cover, err := s.api.ItemCover(ctx, itemID, CurrentCoverWidth)
+// currentCover fetches a book's cover through api, at [CurrentCoverWidth]. A
+// book without one is not an error: Audiobookshelf answers 404, and the cover
+// is nil. Nor is another status of Audiobookshelf: the cover is nil and the
+// problem says what the status was, and nothing the server said. An error that
+// is not a status is returned.
+func currentCover(ctx context.Context, api interface {
+	ItemCover(ctx context.Context, itemID string, width int) (abs.Image, error)
+}, itemID string) (img *abs.Image, problem string, err error) {
+	cover, err := api.ItemCover(ctx, itemID, CurrentCoverWidth)
 	var status *abs.StatusError
 	switch {
 	case errors.As(err, &status) && status.StatusCode == http.StatusNotFound:
@@ -228,13 +241,73 @@ func (s *Covers) Set(ctx context.Context, itemID, coverURL string) (CoverSet, er
 	if err != nil {
 		return CoverSet{}, err
 	}
-	err = s.api.SetCoverURL(ctx, itemID, coverURL)
-	var status *abs.StatusError
-	switch {
-	case errors.As(err, &status) && status.StatusCode == http.StatusForbidden:
-		return CoverSet{}, fmt.Errorf("item %s: %w", itemID, ErrNoCoverPermission)
-	case err != nil:
-		return CoverSet{}, fmt.Errorf("setting the cover of item %s: %w", itemID, err)
+	if err := s.api.SetCoverURL(ctx, itemID, coverURL); err != nil {
+		return CoverSet{}, coverSetError(itemID, err)
 	}
 	return CoverSet{ItemID: itemID, Title: b.Metadata.Title}, nil
+}
+
+// coverSetError is the error for err, the failure of a request that set the
+// cover of the book itemID. The book was read first, so a 403 can only mean a
+// missing permission, and is an [ErrNoCoverPermission] error, without what
+// the server said. Any other error is wrapped as it is.
+func coverSetError(itemID string, err error) error {
+	if status, ok := errors.AsType[*abs.StatusError](err); ok && status.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("item %s: %w", itemID, ErrNoCoverPermission)
+	}
+	return fmt.Errorf("setting the cover of item %s: %w", itemID, err)
+}
+
+// Prompt writes a prompt for an image app outside this server, such as the
+// Gemini app or ChatGPT, for a book's cover. With r.Style it is the prompt for
+// a new cover, as [newCoverPrompt] writes it from the book's title, author and
+// genres as stored, r.Premise and r.TitleText, with r.Title in place of the
+// book's title when it has one, followed by [squareLine]: audiobook covers are
+// square, and no setting of the app carries the shape. With r.Instructions it
+// is the prompt for cleaning the current cover as [editCoverPrompt] writes it,
+// with Edit set, which asks for a square cover itself. Either way AspectRatio
+// is [squareRatio], and the book's library is not read. The inputs are trimmed
+// and each one given must be plain text within [MaxStyleLength],
+// [MaxPremiseLength], [MaxTitleLength] and [MaxEditLength]; the error names the
+// field. Giving both Style and Instructions, or neither, is an
+// [ErrStyleOrInstructions] error. All of this is checked before any call. An
+// item that is not a book is an [ErrBooksOnly] error.
+func (s *Covers) Prompt(ctx context.Context, r PromptRequest) (CoverPrompt, error) {
+	style, premise, title, instructions := strings.TrimSpace(r.Style), strings.TrimSpace(r.Premise), strings.TrimSpace(r.Title), strings.TrimSpace(r.Instructions)
+	if (style == "") == (instructions == "") {
+		return CoverPrompt{}, ErrStyleOrInstructions
+	}
+	for _, f := range []struct {
+		name, value string
+		limit       int
+	}{{"style", style, MaxStyleLength}, {"premise", premise, MaxPremiseLength}, {"title", title, MaxTitleLength}, {"instructions", instructions, MaxEditLength}} {
+		if f.value == "" {
+			continue
+		}
+		if reason := badValue(f.name, f.value, f.limit); reason != "" {
+			return CoverPrompt{}, errors.New(reason)
+		}
+	}
+
+	li, err := s.api.Item(ctx, r.ItemID)
+	if err != nil {
+		return CoverPrompt{}, err
+	}
+	b, err := asBook(li)
+	if err != nil {
+		return CoverPrompt{}, err
+	}
+	m := b.Metadata
+	out := CoverPrompt{
+		ItemID: r.ItemID, Title: m.Title, AspectRatio: squareRatio,
+		BookPage: s.serverURL + "/item/" + url.PathEscape(r.ItemID),
+	}
+	if instructions != "" {
+		out.Edit = true
+		out.Prompt = editCoverPrompt(instructions)
+		return out, nil
+	}
+	book := coverBook{Title: cmp.Or(title, m.Title), Author: m.AuthorName, Genres: m.Genres}
+	out.Prompt = newCoverPrompt(book, style, premise, r.TitleText, false) + "\n" + squareLine
+	return out, nil
 }

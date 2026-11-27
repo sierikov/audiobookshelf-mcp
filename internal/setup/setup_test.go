@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -68,12 +69,44 @@ func (v *fakeVerify) check(_ context.Context, url, token string) (Account, error
 	return v.acct, nil
 }
 
+// fakeGeminiCheck stands in for Google's check of a Gemini key. The first
+// `failures` calls return err; later ones accept the key.
+type fakeGeminiCheck struct {
+	err      error
+	failures int
+	keys     []string
+}
+
+func (g *fakeGeminiCheck) check(_ context.Context, key string) error {
+	g.keys = append(g.keys, key)
+	if len(g.keys) <= g.failures {
+		return g.err
+	}
+	return nil
+}
+
+// hiddenInput stands in for the terminal's hidden prompt: each read returns
+// the next answer, and counts it.
+type hiddenInput struct {
+	answers []string
+	asked   int
+}
+
+func (h *hiddenInput) read() (string, error) {
+	if h.asked >= len(h.answers) {
+		return "", errors.New("the test gave no more hidden answers")
+	}
+	h.asked++
+	return h.answers[h.asked-1], nil
+}
+
 // fixture is everything Run needs: two detected fake agents, a fake check
 // that accepts any credentials, and a settings file in a temp directory.
 type fixture struct {
 	deps   Deps
 	a, b   *fakeAgent
 	verify *fakeVerify
+	gemini *fakeGeminiCheck
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -82,14 +115,23 @@ func newFixture(t *testing.T) *fixture {
 		a:      &fakeAgent{id: "fake-a", name: "Fake A", detected: true},
 		b:      &fakeAgent{id: "fake-b", name: "Fake B", detected: true},
 		verify: &fakeVerify{acct: Account{Username: "artem", Libraries: 1, CanUpdate: true, CanUpload: true}},
+		gemini: &fakeGeminiCheck{},
 	}
 	f.deps = Deps{
-		ConfigPath: filepath.Join(t.TempDir(), "audiobookshelf-mcp", "config.json"),
-		Agents:     []agents.Agent{f.a, f.b},
-		Verify:     f.verify.check,
-		Entry:      testEntry,
+		ConfigPath:     filepath.Join(t.TempDir(), "audiobookshelf-mcp", "config.json"),
+		Agents:         []agents.Agent{f.a, f.b},
+		Verify:         f.verify.check,
+		CheckGeminiKey: f.gemini.check,
+		Entry:          testEntry,
 	}
 	return f
+}
+
+// hidden makes the hidden prompt answer with answers, one per read.
+func (f *fixture) hidden(answers ...string) *hiddenInput {
+	h := &hiddenInput{answers: answers}
+	f.deps.ReadSecret = h.read
+	return h
 }
 
 // run runs setup on scripted input and returns what it printed.
@@ -128,7 +170,9 @@ func yes() Options {
 func TestRun_InteractiveHappyPath(t *testing.T) {
 	f := newFixture(t)
 
-	out, err := f.run(t, "https://abs.example/\nsecret\ny\n\n", Options{})
+	// Yes to the toolsets turns covers on, so Enter at the Gemini key question
+	// skips the key.
+	out, err := f.run(t, "https://abs.example/\nsecret\ny\n\n\n", Options{})
 
 	require.NoError(t, err)
 	assert.Equal(t, config.Config{URL: "https://abs.example", Token: "secret", Toolsets: editingOn}, f.saved(t))
@@ -137,6 +181,8 @@ func TestRun_InteractiveHappyPath(t *testing.T) {
 	assert.Contains(t, out, "API token (Settings → Users → your user → API Token): ")
 	assert.Contains(t, out, "Connected to https://abs.example as artem, 1 library.")
 	assert.Contains(t, out, "Turn on the tools that edit your library (chapters, genres, tags, descriptions, series, covers)? [y/N]: ")
+	assert.Contains(t, out, "Gemini API key for made covers (paid: about $0.07 to $0.16 a cover; Enter to skip, \"none\" to remove): ")
+	assert.Empty(t, f.gemini.keys)
 	assert.Contains(t, out, "Saved settings to "+f.deps.ConfigPath+".")
 	assert.Contains(t, out, "  1. Fake A\n  2. Fake B\n")
 	assert.Contains(t, out, `Add audiobookshelf to all of these? Press Enter for all, or type numbers (e.g. 1,3), or "none": `)
@@ -174,27 +220,32 @@ func TestRun_ReadSecretErrorStopsSetup(t *testing.T) {
 
 func TestRun_KeepsSavedValuesOnEnter(t *testing.T) {
 	f := newFixture(t)
-	saved := config.Config{URL: testURL, Token: "saved-token", Toolsets: []string{"all"}}
+	saved := config.Config{URL: testURL, Token: "saved-token", Toolsets: []string{"all"}, GeminiKey: "saved-gem"}
 	f.seed(t, saved)
 
-	out, err := f.run(t, "\n\n\n\n", Options{})
+	// The URL, the token, the toolsets, the Gemini key and the agents.
+	out, err := f.run(t, "\n\n\n\n\n", Options{})
 
 	require.NoError(t, err)
 	assert.Equal(t, saved, f.saved(t))
 	assert.Equal(t, []verifyCall{{testURL, "saved-token"}}, f.verify.calls)
+	assert.Empty(t, f.gemini.keys, "a key that is kept is not checked again")
 	assert.Contains(t, out, "Audiobookshelf URL [https://abs.example]: ")
 	assert.Contains(t, out, "API token (Settings → Users → your user → API Token), Enter keeps the saved one: ")
 	assert.Contains(t, out, "? [Y/n]: ")
+	assert.Contains(t, out, `Enter to keep the saved key, "none" to remove): `)
 	assert.Len(t, f.a.added, 1)
 	assert.Len(t, f.b.added, 1)
 	assert.NotContains(t, out, "saved-token")
+	assert.NotContains(t, out, "saved-gem")
 }
 
 func TestRun_FlagsReplaceSavedValues(t *testing.T) {
 	f := newFixture(t)
 	f.seed(t, config.Config{URL: "https://old.example", Token: "old-token", Toolsets: []string{"all"}})
 
-	out, err := f.run(t, "\n\n", Options{URL: " https://new.example// ", Token: "new-token"})
+	// Enter at the toolsets, the Gemini key (all includes covers) and the agents.
+	out, err := f.run(t, "\n\n\n", Options{URL: " https://new.example// ", Token: "new-token"})
 
 	require.NoError(t, err)
 	assert.Equal(t, config.Config{URL: "https://new.example", Token: "new-token", Toolsets: []string{"all"}}, f.saved(t))
@@ -374,7 +425,12 @@ func TestRun_ToolsetsPrompt(t *testing.T) {
 			f := newFixture(t)
 			f.seed(t, config.Config{URL: "https://old.example", Token: "old-token", Toolsets: tt.saved})
 
-			out, err := f.run(t, tt.answer+"\nnone\n", Options{URL: testURL, Token: testToken})
+			// Covers on means the Gemini key question comes before the agents.
+			input := tt.answer + "\n"
+			if slices.Contains(tt.want, "covers") || slices.Contains(tt.want, "all") {
+				input += "\n"
+			}
+			out, err := f.run(t, input+"none\n", Options{URL: testURL, Token: testToken})
 
 			require.NoError(t, err)
 			assert.Contains(t, out, "(chapters, genres, tags, descriptions, series, covers)? "+tt.suffix+": ")
@@ -423,7 +479,8 @@ func TestRun_ToolsetsFlagAndYes(t *testing.T) {
 func TestRun_ToolsetsFlagSkipsThePromptWhenInteractive(t *testing.T) {
 	f := newFixture(t)
 
-	out, err := f.run(t, "none\n", Options{URL: testURL, Token: testToken, ToolsetsSet: true, Toolsets: []string{"all"}})
+	// "all" includes covers, so Enter at the Gemini key question comes first.
+	out, err := f.run(t, "\nnone\n", Options{URL: testURL, Token: testToken, ToolsetsSet: true, Toolsets: []string{"all"}})
 
 	require.NoError(t, err)
 	assert.NotContains(t, out, "Turn on the tools")
@@ -502,6 +559,355 @@ func TestRun_WarnsWithoutUploadPermission(t *testing.T) {
 	}
 }
 
+// coversOn is the options of a run that has covers on from a flag, so the only
+// prompt left before the agents is the Gemini key.
+func coversOn() Options {
+	return Options{URL: testURL, Token: testToken, ToolsetsSet: true, Toolsets: []string{"covers"}}
+}
+
+func TestRun_AsksForTheGeminiKeyWhenCoversAreOn(t *testing.T) {
+	const (
+		skipPrompt = `Gemini API key for made covers (paid: about $0.07 to $0.16 a cover; Enter to skip, "none" to remove): `
+		keepPrompt = `Gemini API key for made covers (paid: about $0.07 to $0.16 a cover; Enter to keep the saved key, "none" to remove): `
+	)
+
+	t.Run("a new key that works is checked and saved", func(t *testing.T) {
+		f := newFixture(t)
+		hidden := f.hidden(" gem-secret \n")
+
+		out, err := f.run(t, "none\n", coversOn())
+
+		require.NoError(t, err)
+		assert.Contains(t, out, skipPrompt)
+		assert.NotContains(t, out, "Enter to keep the saved key")
+		assert.Equal(t, 1, hidden.asked, "the key is read with ReadSecret")
+		assert.Equal(t, []string{"gem-secret"}, f.gemini.keys)
+		assert.Contains(t, out, "Gemini key works (this check can't see whether your Google project has credit).\n")
+		assert.Equal(t, config.Config{URL: testURL, Token: testToken, Toolsets: []string{"covers"}, GeminiKey: "gem-secret"}, f.saved(t))
+		assert.NotContains(t, out, "gem-secret")
+	})
+
+	t.Run("with no ReadSecret the key is a plain line", func(t *testing.T) {
+		f := newFixture(t)
+
+		out, err := f.run(t, "gem-secret\nnone\n", coversOn())
+
+		require.NoError(t, err)
+		assert.Equal(t, "gem-secret", f.saved(t).GeminiKey)
+		assert.NotContains(t, out, "gem-secret")
+	})
+
+	t.Run("a saved key is offered, and Enter keeps it", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, config.Config{URL: testURL, Token: testToken, GeminiKey: "saved-gem"})
+		f.hidden("")
+
+		out, err := f.run(t, "none\n", coversOn())
+
+		require.NoError(t, err)
+		assert.Contains(t, out, keepPrompt)
+		assert.Empty(t, f.gemini.keys)
+		assert.Equal(t, "saved-gem", f.saved(t).GeminiKey)
+		assert.NotContains(t, out, "saved-gem")
+	})
+
+	t.Run("a new key replaces the saved one", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, config.Config{URL: testURL, Token: testToken, GeminiKey: "saved-gem"})
+		f.hidden("new-gem")
+
+		out, err := f.run(t, "none\n", coversOn())
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"new-gem"}, f.gemini.keys)
+		assert.Equal(t, "new-gem", f.saved(t).GeminiKey)
+		assert.NotContains(t, out, "new-gem")
+		assert.NotContains(t, out, "saved-gem")
+	})
+
+	t.Run("a key Google refuses is asked for again", func(t *testing.T) {
+		f := newFixture(t)
+		f.gemini.err = errors.New("API key not valid: bad-gem")
+		f.gemini.failures = 1
+		f.hidden("bad-gem", "good-gem")
+
+		out, err := f.run(t, "none\n", coversOn())
+
+		require.NoError(t, err)
+		assert.Contains(t, out, "Google refused the key: API key not valid: ***\n")
+		assert.Equal(t, 2, strings.Count(out, skipPrompt))
+		assert.Equal(t, []string{"bad-gem", "good-gem"}, f.gemini.keys)
+		assert.Equal(t, "good-gem", f.saved(t).GeminiKey)
+		assert.NotContains(t, out, "bad-gem")
+		assert.NotContains(t, out, "good-gem")
+	})
+
+	t.Run("Enter after a refusal skips the key", func(t *testing.T) {
+		f := newFixture(t)
+		f.gemini.err = errors.New("API key not valid")
+		f.gemini.failures = 99
+		f.hidden("bad-gem", "")
+
+		out, err := f.run(t, "none\n", coversOn())
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, strings.Count(out, "Google refused the key:"))
+		assert.Equal(t, []string{"bad-gem"}, f.gemini.keys)
+		assert.Empty(t, f.saved(t).GeminiKey)
+		assert.Contains(t, out, "Saved settings to ")
+	})
+
+	t.Run("Enter after a refusal keeps the saved key, never the refused one", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, config.Config{URL: testURL, Token: testToken, GeminiKey: "saved-gem"})
+		f.gemini.err = errors.New("API key not valid")
+		f.gemini.failures = 99
+		f.hidden("bad-gem", "")
+
+		_, err := f.run(t, "none\n", coversOn())
+
+		require.NoError(t, err)
+		assert.Equal(t, "saved-gem", f.saved(t).GeminiKey)
+	})
+
+	t.Run("three refusals skip the key and setup goes on", func(t *testing.T) {
+		f := newFixture(t)
+		f.gemini.err = errors.New("API key not valid: bad-gem")
+		f.gemini.failures = 99
+		f.hidden("bad-gem", "bad-gem", "bad-gem")
+
+		out, err := f.run(t, "none\n", coversOn())
+
+		require.NoError(t, err)
+		assert.Equal(t, 3, strings.Count(out, "Google refused the key: API key not valid: ***\n"))
+		assert.Equal(t, []string{"bad-gem", "bad-gem", "bad-gem"}, f.gemini.keys)
+		assert.Contains(t, out, "Skipped the Gemini key; made covers stay off.\n")
+		assert.NotContains(t, out, "Kept the saved Gemini key.")
+		assert.NotContains(t, out, "bad-gem")
+		// What was entered before the key is saved, without a key.
+		assert.Equal(t, config.Config{URL: testURL, Token: testToken, Toolsets: []string{"covers"}}, f.saved(t))
+		assert.Contains(t, out, "Saved settings to "+f.deps.ConfigPath+".")
+		assert.Contains(t, out, `Add audiobookshelf to all of these?`, "the agents are still asked about")
+	})
+
+	t.Run("three refusals keep the saved key", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, config.Config{URL: testURL, Token: testToken, Toolsets: []string{"covers"}, GeminiKey: "saved-gem"})
+		f.gemini.err = errors.New("API key not valid: bad-gem")
+		f.gemini.failures = 99
+		f.hidden("bad-gem", "bad-gem", "bad-gem")
+
+		out, err := f.run(t, "\n", coversOn())
+
+		require.NoError(t, err)
+		assert.Equal(t, 3, strings.Count(out, "Google refused the key:"))
+		assert.Contains(t, out, "Kept the saved Gemini key.\n")
+		assert.NotContains(t, out, "Skipped the Gemini key")
+		assert.NotContains(t, out, "bad-gem")
+		assert.NotContains(t, out, "saved-gem")
+		assert.Equal(t, config.Config{URL: testURL, Token: testToken, Toolsets: []string{"covers"}, GeminiKey: "saved-gem"}, f.saved(t))
+		assert.Len(t, f.a.added, 1, "the agents are added as usual")
+		assert.Len(t, f.b.added, 1)
+	})
+
+	t.Run("a hidden prompt that fails stops setup", func(t *testing.T) {
+		f := newFixture(t)
+		errTerminal := errors.New("not a terminal")
+		f.deps.ReadSecret = func() (string, error) { return "", errTerminal }
+
+		_, err := f.run(t, "", coversOn())
+
+		require.ErrorIs(t, err, errTerminal)
+		assert.Empty(t, f.gemini.keys)
+		f.requireNothingSaved(t)
+	})
+
+	t.Run("without a check the key is saved as typed", func(t *testing.T) {
+		f := newFixture(t)
+		f.deps.CheckGeminiKey = nil
+		f.hidden("gem-secret")
+
+		out, err := f.run(t, "none\n", coversOn())
+
+		require.NoError(t, err)
+		assert.Equal(t, "gem-secret", f.saved(t).GeminiKey)
+		assert.NotContains(t, out, "Gemini key works")
+	})
+}
+
+func TestRun_AsksForTheGeminiKeyOnlyWhenCoversAreOn(t *testing.T) {
+	tests := []struct {
+		name     string
+		toolsets []string
+		asks     bool
+	}{
+		{"covers", []string{"covers"}, true},
+		{"all", []string{"all"}, true},
+		{"covers among others", []string{"libraries", "chapters", "covers"}, true},
+		{"chapters and metadata", []string{"chapters", "metadata"}, false},
+		{"read-only toolsets", []string{"browse"}, false},
+		{"editing off", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			hidden := f.hidden("")
+			opts := Options{URL: testURL, Token: testToken, ToolsetsSet: true, Toolsets: tt.toolsets}
+
+			out, err := f.run(t, "none\n", opts)
+
+			require.NoError(t, err)
+			if tt.asks {
+				assert.Equal(t, 1, hidden.asked)
+				assert.Contains(t, out, "Gemini API key for made covers")
+			} else {
+				assert.Zero(t, hidden.asked)
+				assert.NotContains(t, out, "Gemini API key")
+			}
+		})
+	}
+
+	t.Run("covers turned on at the toolsets prompt", func(t *testing.T) {
+		f := newFixture(t)
+		hidden := f.hidden("")
+
+		out, err := f.run(t, "y\nnone\n", Options{URL: testURL, Token: testToken})
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, hidden.asked)
+		assert.Contains(t, out, "Gemini API key for made covers")
+	})
+	t.Run("covers turned off at the toolsets prompt", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, config.Config{URL: testURL, Token: testToken, Toolsets: []string{"covers"}})
+		hidden := f.hidden("")
+
+		out, err := f.run(t, "n\nnone\n", Options{URL: testURL, Token: testToken})
+
+		require.NoError(t, err)
+		assert.Zero(t, hidden.asked)
+		assert.NotContains(t, out, "Gemini API key")
+	})
+}
+
+func TestRun_KeepsTheSavedGeminiKey(t *testing.T) {
+	saved := config.Config{URL: testURL, Token: testToken, Toolsets: []string{"covers"}, GeminiKey: "saved-gem"}
+
+	t.Run("a --yes run", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, saved)
+		hidden := f.hidden()
+
+		out, err := f.run(t, "", yes())
+
+		require.NoError(t, err)
+		assert.Equal(t, saved, f.saved(t))
+		assert.Zero(t, hidden.asked)
+		assert.Empty(t, f.gemini.keys)
+		assert.NotContains(t, out, "Gemini API key")
+	})
+
+	t.Run("a run where covers is off", func(t *testing.T) {
+		f := newFixture(t)
+		withChapters := saved
+		withChapters.Toolsets = []string{"chapters"}
+		f.seed(t, withChapters)
+		hidden := f.hidden()
+
+		// Enter at the toolsets question keeps chapters.
+		out, err := f.run(t, "\nnone\n", Options{URL: testURL, Token: testToken})
+
+		require.NoError(t, err)
+		assert.Equal(t, withChapters, f.saved(t))
+		assert.Zero(t, hidden.asked)
+		assert.NotContains(t, out, "Gemini API key")
+	})
+
+	t.Run("a run that turns the editing tools off", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, saved)
+		hidden := f.hidden()
+
+		_, err := f.run(t, "n\nnone\n", Options{URL: testURL, Token: testToken})
+
+		require.NoError(t, err)
+		want := saved
+		want.Toolsets = nil
+		assert.Equal(t, want, f.saved(t))
+		assert.Zero(t, hidden.asked)
+	})
+
+	t.Run("a run where only the URL changed", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, saved)
+		// Enter keeps the token and the key.
+		f.hidden("", "")
+
+		// Enter keeps the toolsets, then "none" is the agents.
+		_, err := f.run(t, "https://new.example\n\nnone\n", Options{})
+
+		require.NoError(t, err)
+		want := saved
+		want.URL = "https://new.example"
+		assert.Equal(t, want, f.saved(t))
+		assert.Empty(t, f.gemini.keys)
+	})
+
+	t.Run("a run where only the URL changed, with the toolsets given", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, saved)
+		f.hidden("")
+
+		_, err := f.run(t, "none\n", Options{URL: "https://new.example", Token: testToken, ToolsetsSet: true, Toolsets: []string{"all"}})
+
+		require.NoError(t, err)
+		want := saved
+		want.URL = "https://new.example"
+		want.Toolsets = []string{"all"}
+		assert.Equal(t, want, f.saved(t))
+	})
+}
+
+func TestRun_NoneRemovesTheGeminiKey(t *testing.T) {
+	for _, answer := range []string{"none", "NONE", " None "} {
+		t.Run(answer, func(t *testing.T) {
+			f := newFixture(t)
+			f.seed(t, config.Config{URL: testURL, Token: testToken, Toolsets: []string{"covers"}, GeminiKey: "saved-gem"})
+			f.hidden(answer)
+
+			out, err := f.run(t, "none\n", coversOn())
+
+			require.NoError(t, err)
+			assert.Equal(t, config.Config{URL: testURL, Token: testToken, Toolsets: []string{"covers"}}, f.saved(t))
+			assert.Empty(t, f.gemini.keys, "nothing is checked when the key is removed")
+			assert.NotContains(t, out, "Gemini key works")
+			raw, err := os.ReadFile(f.deps.ConfigPath)
+			require.NoError(t, err)
+			assert.NotContains(t, string(raw), "geminiApiKey")
+			assert.NotContains(t, string(raw), "saved-gem")
+		})
+	}
+}
+
+func TestRun_NeverPrintsTheGeminiKey(t *testing.T) {
+	const key = "AIza-secret-key"
+	f := newFixture(t)
+	f.gemini.err = fmt.Errorf("Google answered %s with API_KEY_INVALID", key)
+	f.gemini.failures = 1
+	f.hidden(key, key)
+	opts := coversOn()
+	opts.Agents = []string{"fake-a", "fake-b"}
+
+	out, err := f.run(t, "", opts)
+
+	require.NoError(t, err)
+	assert.NotContains(t, out, key)
+	assert.Equal(t, key, f.saved(t).GeminiKey)
+	for _, a := range []*fakeAgent{f.a, f.b} {
+		assert.Equal(t, []agents.Entry{testEntry}, a.added, "agents get the command only, never the key")
+	}
+}
+
 func TestRun_YesWithFlags(t *testing.T) {
 	f := newFixture(t)
 
@@ -511,7 +917,7 @@ func TestRun_YesWithFlags(t *testing.T) {
 	assert.Equal(t, config.Config{URL: testURL, Token: testToken}, f.saved(t))
 	assert.Equal(t, []agents.Entry{testEntry}, f.a.added)
 	assert.Equal(t, []agents.Entry{testEntry}, f.b.added)
-	for _, prompt := range []string{"Audiobookshelf URL", "API token", "[y/N]", "[Y/n]", "Press Enter", "1. Fake A"} {
+	for _, prompt := range []string{"Audiobookshelf URL", "API token", "[y/N]", "[Y/n]", "Gemini API key", "Press Enter", "1. Fake A"} {
 		assert.NotContains(t, out, prompt)
 	}
 	assert.Contains(t, out, "Saved settings to ")
@@ -719,17 +1125,19 @@ func TestRun_EndOfInputAborts(t *testing.T) {
 	const wantErr = "input ended before setup finished; " +
 		"pass --yes to accept the defaults, and --agents to choose which agents to change"
 	tests := []struct {
-		name  string
-		input string
+		name     string
+		toolsets []string
+		input    string
 	}{
-		{"no input at all", ""},
-		{"input ends at the toolsets prompt", "\n\n"},
-		{"input ends at the agent prompt", "\n\n\n"},
+		{"no input at all", nil, ""},
+		{"input ends at the toolsets prompt", nil, "\n\n"},
+		{"input ends at the Gemini key prompt", []string{"covers"}, "\n\n\n"},
+		{"input ends at the agent prompt", nil, "\n\n\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t)
-			f.seed(t, config.Config{URL: testURL, Token: "saved-token"})
+			f.seed(t, config.Config{URL: testURL, Token: "saved-token", Toolsets: tt.toolsets})
 
 			_, err := f.run(t, tt.input, Options{})
 

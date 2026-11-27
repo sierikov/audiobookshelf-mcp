@@ -1,9 +1,12 @@
 package abs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strconv"
 )
@@ -216,5 +219,48 @@ func (c *Client) SetCoverURL(ctx context.Context, itemID, coverURL string) error
 	body := struct {
 		URL string `json:"url"`
 	}{coverURL}
+	return c.do(ctx, http.MethodPost, "/api/items/"+pathParam(itemID)+"/cover", nil, body, nil)
+}
+
+// coverFileExtensions maps the image types Audiobookshelf takes as an
+// uploaded cover to the file extension it reads the type from.
+var coverFileExtensions = map[string]string{
+	"image/png":  "png",
+	"image/jpeg": "jpg",
+	"image/webp": "webp",
+}
+
+// SetCoverFile makes img the item's cover by uploading it as a multipart file.
+// Audiobookshelf takes only PNG, JPEG and WebP and reads the type from the
+// file name, so any other MIME type is an error and no request is made. As
+// with [Client.SetCoverURL], it replaces the old cover file and needs the
+// user's Update and Upload permissions, without either of which it answers
+// with a 403 [*StatusError].
+func (c *Client) SetCoverFile(ctx context.Context, itemID string, img Image) error {
+	ext, ok := coverFileExtensions[img.MIMEType]
+	if !ok {
+		return fmt.Errorf("cover type %q is not one Audiobookshelf takes: use PNG, JPEG or WebP", img.MIMEType)
+	}
+
+	var buf bytes.Buffer
+	form := multipart.NewWriter(&buf)
+	header := textproto.MIMEHeader{}
+	// Written by hand, as [multipart.Writer.CreateFormFile] does, because
+	// mime.FormatMediaType sorts the parameters and leaves a plain value
+	// unquoted, which a strict parser may not take. ext is from the fixed map.
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="cover"; filename="cover.%s"`, ext))
+	header.Set("Content-Type", img.MIMEType)
+	part, err := form.CreatePart(header)
+	if err != nil {
+		return fmt.Errorf("encoding request: %w", err)
+	}
+	if _, err := part.Write(img.Data); err != nil {
+		return fmt.Errorf("encoding request: %w", err)
+	}
+	if err := form.Close(); err != nil {
+		return fmt.Errorf("encoding request: %w", err)
+	}
+
+	body := formBody{contentType: form.FormDataContentType(), data: buf.Bytes()}
 	return c.do(ctx, http.MethodPost, "/api/items/"+pathParam(itemID)+"/cover", nil, body, nil)
 }

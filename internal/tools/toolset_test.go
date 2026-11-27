@@ -70,12 +70,14 @@ func TestToolsets_CoversOptIn(t *testing.T) {
 	assert.True(t, resolveToolsets([]string{"covers"})[toolsetCovers])
 	assert.Contains(t, AllToolsetMetas(), metaCovers)
 	assert.False(t, metaCovers.Default)
+	assert.Equal(t, "Find, make and set book covers (includes writes; making covers costs money)", metaCovers.Description)
 
 	defaults := connectSession(t, NewServer(mockServices(t), Options{}))
 	listed, err := defaults.ListTools(t.Context(), nil)
 	require.NoError(t, err)
 	for _, tool := range listed.Tools {
-		assert.NotContains(t, []string{"search_covers", "set_cover"}, tool.Name, "the defaults leave the cover tools out")
+		assert.NotContains(t, []string{"search_covers", "set_cover", "get_cover_prompt", "generate_covers", "clean_cover"}, tool.Name,
+			"the defaults leave the cover tools out")
 	}
 
 	all := connectSession(t, NewServer(mockServices(t), Options{Toolsets: []string{"all"}}))
@@ -87,4 +89,24 @@ func TestToolsets_CoversOptIn(t *testing.T) {
 	}
 	assert.Contains(t, names, "search_covers")
 	assert.Contains(t, names, "set_cover")
+	assert.Contains(t, names, "get_cover_prompt")
+	assert.Contains(t, names, "generate_covers", "the made-cover tools are in covers, when there is a service")
+	assert.Contains(t, names, "clean_cover")
+}
+
+func TestToolsets_MadeCoverToolsNeedAService(t *testing.T) {
+	svcs := mockServices(t)
+	svcs.CoverArt = nil
+
+	srv := connectSession(t, NewServer(svcs, Options{Toolsets: []string{"all"}}))
+	listed, err := srv.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	names := make([]string, 0, len(listed.Tools))
+	for _, tool := range listed.Tools {
+		names = append(names, tool.Name)
+	}
+	assert.NotContains(t, names, "generate_covers", "no Gemini key, no paid tools")
+	assert.NotContains(t, names, "clean_cover")
+	assert.Contains(t, names, "set_cover")
+	assert.Contains(t, names, "get_cover_prompt")
 }

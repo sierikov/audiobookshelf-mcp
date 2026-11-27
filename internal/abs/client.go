@@ -108,7 +108,15 @@ func htmlTitle(page string) string {
 	return cmp.Or(title, "an HTML page without a title")
 }
 
-// send sends a request with an optional JSON body and returns the response.
+// formBody is a request body that is already encoded as multipart/form-data;
+// contentType carries its boundary.
+type formBody struct {
+	contentType string
+	data        []byte
+}
+
+// send sends a request and returns the response. A nil body sends none, a
+// [formBody] is sent as it is, and anything else is encoded as JSON.
 // The caller closes the response body and checks the status.
 func (c *Client) send(ctx context.Context, method, path string, query url.Values, body any) (*http.Response, error) {
 	u, err := url.Parse(c.baseURL + path)
@@ -120,12 +128,19 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 	}
 
 	reqBody := io.Reader(http.NoBody)
-	if body != nil {
+	var contentType string
+	switch b := body.(type) {
+	case nil:
+	case formBody:
+		reqBody = bytes.NewReader(b.data)
+		contentType = b.contentType
+	default:
 		encoded, err := json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("encoding request: %w", err)
 		}
 		reqBody = bytes.NewReader(encoded)
+		contentType = "application/json"
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), reqBody)
@@ -133,8 +148,8 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -144,7 +159,7 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 	return resp, nil
 }
 
-// do sends a request with an optional JSON body and decodes a JSON response
+// do sends a request with an optional body (see [Client.send]) and decodes a JSON response
 // into out when out is non-nil. Any status other than 200 is a [*StatusError].
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
 	resp, err := c.send(ctx, method, path, query, body)

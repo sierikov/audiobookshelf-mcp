@@ -1,8 +1,13 @@
 package abs_test
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"testing"
@@ -431,6 +436,27 @@ func TestUpdateItems(t *testing.T) {
 	]`, string(srv.LastBody()))
 }
 
+func TestUpdateItems_Subtitle(t *testing.T) {
+	c, srv := newClient(t, map[string]any{"/api/items/batch/update": map[string]any{"success": true, "updates": 3}})
+
+	n, err := c.UpdateItems(t.Context(), []abs.ItemUpdate{
+		{ID: "li_1", MediaPayload: abs.MediaPayload{Metadata: &abs.MetadataPayload{Subtitle: new("Роман")}}},
+		{ID: "li_2", MediaPayload: abs.MediaPayload{Metadata: &abs.MetadataPayload{Subtitle: new("")}}},
+		{ID: "li_3", MediaPayload: abs.MediaPayload{Metadata: &abs.MetadataPayload{Language: new("Russian")}}},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+	// A subtitle that is set is sent; one removed is sent as "", as an empty
+	// language or description is; one left out has no key at all.
+	assert.JSONEq(t, `[
+		{"id":"li_1","mediaPayload":{"metadata":{"subtitle":"Роман"}}},
+		{"id":"li_2","mediaPayload":{"metadata":{"subtitle":""}}},
+		{"id":"li_3","mediaPayload":{"metadata":{"language":"Russian"}}}
+	]`, string(srv.LastBody()))
+	assert.NotContains(t, string(srv.LastBody()), "null")
+}
+
 func TestUpdateItems_Non200IsError(t *testing.T) {
 	c, _ := newClient(t, map[string]any{})
 
@@ -614,6 +640,94 @@ func TestSetCoverURL(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, se.StatusCode)
 		assert.Equal(t, "Forbidden", se.Body)
 	})
+}
+
+// uploadedPart is the one part of a multipart body.
+type uploadedPart struct {
+	field       string
+	filename    string
+	contentType string
+	data        []byte
+}
+
+// readUpload reads the multipart body the fake server last received for path
+// and returns its only part.
+func readUpload(t *testing.T, srv *abstest.Server, path string) uploadedPart {
+	t.Helper()
+	mediaType, params, err := mime.ParseMediaType(srv.LastRequest().Header.Get("Content-Type"))
+	require.NoError(t, err)
+	require.Equal(t, "multipart/form-data", mediaType)
+
+	r := multipart.NewReader(bytes.NewReader(srv.LastBodyFor(path)), params["boundary"])
+	part, err := r.NextPart()
+	require.NoError(t, err)
+	data, err := io.ReadAll(part)
+	require.NoError(t, err)
+	_, err = r.NextPart()
+	require.ErrorIs(t, err, io.EOF, "the body has more than one part")
+	return uploadedPart{
+		field:       part.FormName(),
+		filename:    part.FileName(),
+		contentType: part.Header.Get("Content-Type"),
+		data:        data,
+	}
+}
+
+func TestSetCoverFile_UploadsAMultipartCover(t *testing.T) {
+	tests := []struct {
+		mimeType string
+		filename string
+	}{
+		{"image/png", "cover.png"},
+		{"image/jpeg", "cover.jpg"},
+		{"image/webp", "cover.webp"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.mimeType, func(t *testing.T) {
+			data := []byte{0x00, 0x01, 0xff, '\r', '\n', '-', '-', 0xfe, 0x7f}
+			c, srv := newClient(t, map[string]any{
+				"/api/items/li_1/cover": map[string]any{"success": true, "cover": "/metadata/items/li_1/cover.png"},
+			})
+
+			err := c.SetCoverFile(t.Context(), "li_1", abs.Image{Data: data, MIMEType: tt.mimeType})
+
+			require.NoError(t, err)
+			assert.Equal(t, http.MethodPost, srv.LastRequest().Method)
+			assert.Equal(t, "Bearer "+abstest.Token, srv.LastRequest().Header.Get("Authorization"))
+			assert.Equal(t, uploadedPart{
+				field: "cover", filename: tt.filename, contentType: tt.mimeType, data: data,
+			}, readUpload(t, srv, "/api/items/li_1/cover"))
+			// The header as written, which a strict parser takes: name first, both quoted.
+			assert.Contains(t, string(srv.LastBodyFor("/api/items/li_1/cover")),
+				"\r\nContent-Disposition: form-data; name=\"cover\"; filename=\""+tt.filename+"\"\r\n")
+		})
+	}
+
+	t.Run("a refusal is a status error", func(t *testing.T) {
+		c, _ := newClient(t, map[string]any{
+			"/api/items/li_1/cover": abstest.Raw{Status: http.StatusForbidden, ContentType: "text/plain", Body: []byte("Forbidden")},
+		})
+
+		err := c.SetCoverFile(t.Context(), "li_1", abs.Image{Data: []byte{1}, MIMEType: "image/png"})
+
+		var se *abs.StatusError
+		require.ErrorAs(t, err, &se)
+		assert.Equal(t, http.StatusForbidden, se.StatusCode)
+		assert.Equal(t, "Forbidden", se.Body)
+	})
+}
+
+func TestSetCoverFile_RefusesATypeAudiobookshelfDoesNot(t *testing.T) {
+	for _, mimeType := range []string{"image/gif", "text/plain", ""} {
+		t.Run(cmp.Or(mimeType, "no type"), func(t *testing.T) {
+			c, srv := newClient(t, map[string]any{"/api/items/li_1/cover": map[string]any{"success": true}})
+
+			err := c.SetCoverFile(t.Context(), "li_1", abs.Image{Data: []byte{1}, MIMEType: mimeType})
+
+			require.ErrorContains(t, err, "PNG, JPEG or WebP")
+			assert.Nil(t, srv.LastRequest(), "no request is made")
+		})
+	}
 }
 
 func TestUpdateItems_SeriesAuthorsNarrators(t *testing.T) {

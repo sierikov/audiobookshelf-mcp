@@ -557,7 +557,7 @@ func TestFind_PreviewsAreSmall(t *testing.T) {
 	fetch := NewMockImageFetcher(t)
 	fetch.EXPECT().Fetch(mock.Anything, mock.Anything).Return(big, nil)
 
-	got, err := NewCovers(coversAPI(t, "google", urls), fetch).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(coversAPI(t, "google", urls), fetch, "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	require.Len(t, got.Candidates, MaxCoverCandidates)
@@ -572,7 +572,7 @@ func TestFind_PreviewsAreSmall(t *testing.T) {
 		total += len(c.Image.Data)
 	}
 	assert.Less(t, total, 1<<20, "the five together")
-	assert.Equal(t, &currentCover, got.Current, "the current cover is already small, and is not touched")
+	assert.Equal(t, &solarisCover, got.Current, "the current cover is already small, and is not touched")
 }
 
 func TestFind_AnImageThatCannotBeShownIsAProblemOfItsOwn(t *testing.T) {
@@ -585,7 +585,7 @@ func TestFind_AnImageThatCannotBeShownIsAProblemOfItsOwn(t *testing.T) {
 		return jpegOf(t, gradient(500, 750)), nil
 	})
 
-	got, err := NewCovers(coversAPI(t, "google", urls), fetch).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(coversAPI(t, "google", urls), fetch, "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	require.Len(t, got.Candidates, 4)
@@ -605,7 +605,7 @@ func TestFind_ATallStripIsScaledToFit(t *testing.T) {
 	fetch := NewMockImageFetcher(t)
 	fetch.EXPECT().Fetch(mock.Anything, urls[0]).Return(strip, nil)
 
-	got, err := NewCovers(coversAPI(t, "google", urls), fetch).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(coversAPI(t, "google", urls), fetch, "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	require.Len(t, got.Candidates, 1)
@@ -619,7 +619,7 @@ func TestFind_ATallStripPastThePixelLimitIsTooLarge(t *testing.T) {
 	fetch := NewMockImageFetcher(t)
 	fetch.EXPECT().Fetch(mock.Anything, urls[0]).Return(pngClaiming(t, 500, 32001), nil)
 
-	got, err := NewCovers(coversAPI(t, "google", urls), fetch).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(coversAPI(t, "google", urls), fetch, "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	assert.Equal(t, []CoverCandidate{{URL: urls[0], Problem: "too large to preview"}}, got.Candidates)
@@ -632,7 +632,7 @@ func TestFind_AnImageWithinTheLimitsIsPassedOnAsItIs(t *testing.T) {
 	fetch := NewMockImageFetcher(t)
 	fetch.EXPECT().Fetch(mock.Anything, urls[0]).Return(in, nil)
 
-	got, err := NewCovers(coversAPI(t, "google", urls), fetch).Find(t.Context(), "li_1", "google", "", "")
+	got, err := NewCovers(coversAPI(t, "google", urls), fetch, "https://abs.example").Find(t.Context(), "li_1", "google", "", "")
 
 	require.NoError(t, err)
 	assert.Equal(t, []CoverCandidate{{URL: urls[0], Image: &in}}, got.Candidates)
@@ -645,7 +645,7 @@ func TestFind_AWebPLabelledAsJPEGGetsAJPEGPreview(t *testing.T) {
 	srv := serve(t, respond("image/jpeg", webpData))
 	urls := []string{srv.URL + "/cover.jpg"}
 
-	got, err := NewCovers(coversAPI(t, "fantlab", urls), NewImageFetcher()).Find(t.Context(), "li_1", "fantlab", "", "")
+	got, err := NewCovers(coversAPI(t, "fantlab", urls), NewImageFetcher(), "https://abs.example").Find(t.Context(), "li_1", "fantlab", "", "")
 
 	require.NoError(t, err)
 	require.Len(t, got.Candidates, 1)
@@ -658,9 +658,13 @@ func TestFind_AWebPLabelledAsJPEGGetsAJPEGPreview(t *testing.T) {
 // observePreviews makes the service preview images through a fake that records
 // how many run at once, and returns the most it saw. Every preview takes a
 // while, long enough for others to start if they may.
-func observePreviews(svc *Covers) *atomic.Int32 {
+func observePreviews(svc *Covers) *atomic.Int32 { return observePreviewsOf(&svc.preview) }
+
+// observePreviewsOf is [observePreviews] for any service: it replaces the
+// preview function at preview.
+func observePreviewsOf(preview *func(abs.Image) (abs.Image, error)) *atomic.Int32 {
 	var running, most atomic.Int32
-	svc.preview = func(img abs.Image) (abs.Image, error) {
+	*preview = func(img abs.Image) (abs.Image, error) {
 		n := running.Add(1)
 		for {
 			if m := most.Load(); n <= m || most.CompareAndSwap(m, n) {
@@ -676,7 +680,7 @@ func observePreviews(svc *Covers) *atomic.Int32 {
 
 func TestFind_DecodesAtMostTwoPreviewsAtATime(t *testing.T) {
 	urls := coverURLs(MaxCoverCandidates)
-	svc := NewCovers(coversAPI(t, "google", urls), fetchesEvery(t, urls, nil))
+	svc := NewCovers(coversAPI(t, "google", urls), fetchesEvery(t, urls, nil), "https://abs.example")
 	most := observePreviews(svc)
 
 	got, err := svc.Find(t.Context(), "li_1", "google", "", "")
@@ -694,7 +698,7 @@ func TestFind_DecodesAtMostTwoPreviewsAtATime(t *testing.T) {
 func TestFind_OnePreviewLimitForAllSearches(t *testing.T) {
 	const searches = 4
 	urls := coverURLs(MaxCoverCandidates)
-	svc := NewCovers(coversAPI(t, "google", urls), fetchesEvery(t, urls, nil))
+	svc := NewCovers(coversAPI(t, "google", urls), fetchesEvery(t, urls, nil), "https://abs.example")
 	most := observePreviews(svc)
 
 	start := make(chan struct{})
@@ -725,7 +729,7 @@ func TestFind_OnePreviewLimitForAllSearches(t *testing.T) {
 // coversWithSlots is a Covers service that has no API, makes its previews with
 // f and holds them to the given slots.
 func coversWithSlots(slots chan struct{}, f func(abs.Image) (abs.Image, error)) *Covers {
-	svc := NewCovers(nil, nil)
+	svc := NewCovers(nil, nil, "https://abs.example")
 	svc.slots, svc.preview = slots, f
 	return svc
 }

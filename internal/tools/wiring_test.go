@@ -38,7 +38,7 @@ func (s *wiringSuite) StartServer() {
 		Browse:    service.NewBrowse(client),
 		Chapters:  service.NewChapters(client),
 		Metadata:  service.NewMetadata(client),
-		Covers:    service.NewCovers(client, service.NewImageFetcher()),
+		Covers:    service.NewCovers(client, service.NewImageFetcher(), s.srv.URL),
 	}
 }
 
